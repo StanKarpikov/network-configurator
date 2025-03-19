@@ -1,8 +1,10 @@
+import subprocess
+
 import nmcli
 
 class NMCliAdapter:
-    def __init__(self):
-        pass
+    def __init__(self, use_sudo):
+        self._use_sudo = use_sudo
 
     @staticmethod
     def device():
@@ -86,19 +88,31 @@ class NMCliAdapter:
         # self.host.run_host_command("killall hostapd")
         pass
 
-    @staticmethod
-    def iw_add_interface(phy_name, device, device_type):
-        f'iw phy {phy_name} interface add {device} type {device_type}'
+    def iw_add_interface(self, phy_name, device, device_type):
+        prefix = ''
+        if self._use_sudo:
+            prefix = 'sudo '
+        p = subprocess.Popen(f'{prefix}iw phy {phy_name} interface add {device} type {device_type}', shell=True)
+        p.wait()
 
-    @staticmethod
-    def ip_link_set_dev_address(device, mac):
-        f'ip link set dev {device} address {mac}'
+    def ip_link_set_dev_address(self, device, mac):
+        prefix = ''
+        if self._use_sudo:
+            prefix = 'sudo '
+        p = subprocess.Popen(f'{prefix}ip link set dev {device} address {mac}', shell=True)
+        p.wait()
 
-    @staticmethod
-    def ip_link_set_up(device):
-        f'ip link set {device} up'
+    def ip_link_set_up(self, device):
+        prefix = ''
+        if self._use_sudo:
+            prefix = 'sudo '
+        p = subprocess.Popen(f'{prefix}ip link set {device} up', shell=True)
+        p.wait()
 
-    @staticmethod
-    def enable_ip_forward(enable_ip_forward):
-        f'echo {enable_ip_forward} > /proc/sys/net/ipv4/ip_forward'
+    def enable_ip_forward(self, enable_ip_forward):
+        prefix = ''
+        if self._use_sudo:
+            prefix = 'sudo '
+        p = subprocess.Popen(f'{prefix}sysctl -w net.ipv4.ip_forward= {enable_ip_forward}', shell=True)
+        p.wait()
 

@@ -1,8 +1,10 @@
+import json
 import logging
-import queue
+import os
 import subprocess
 import threading
 import time
+import tempfile
 from enum import Enum
 from netaddr import IPAddress
 from ifconfigparser import IfconfigParser
@@ -23,20 +25,24 @@ class InterfaceTypes(Enum):
 class NetworkInterface:
     TYPE = InterfaceTypes.INTERFACE_TYPE_UNDEFINED
 
-    def __init__(self, device, adapter: NMCliAdapter, config):
+    def __init__(self, device, adapter: NMCliAdapter, def_config):
         self._connection_type = ""
         self._ip_read_only = False
         self._lock = threading.RLock()
-        self._config = config
+        self._def_config = def_config
         self._status = None
         self._adapter = adapter
         self._device = device
         self._ip = ""
         self._mask = ""
         self._route = ""
+        self._status_message_str = ""
+        self._status_error = False
 
     def _status_message(self, message, error=False):
         logger.info(f"Status Message {self._device}: {message}")
+        self._status_message_str = message
+        self._status_error = error
 
     def refresh(self):
         raise NotImplementedError("Refresh on the base class not implemented")
@@ -46,6 +52,17 @@ class NetworkInterface:
 
     def _reload(self):
         raise NotImplementedError("Reload on the base class not implemented")
+
+    def get_status(self):
+        with self._lock:
+            status = {
+                self._device: {
+                    "message": self._status_message_str,
+                    "error": self._status_error,
+                    "status": self.status
+                }
+            }
+            return status
 
     @property
     def parameters(self):
@@ -80,8 +97,8 @@ class NetworkInterface:
         with self._lock:
             # if self._ip_read_only:
             #     return
-            self._ip = value
-            self._reload()
+            if self._ip != value:
+                self._ip = value
 
     @property
     def connection_type(self):
@@ -91,8 +108,8 @@ class NetworkInterface:
     @connection_type.setter
     def connection_type(self, value):
         with self._lock:
-            self._connection_type = value
-            self._reload()
+            if self._connection_type != value:
+                self._connection_type = value
 
     @property
     def mask(self):
@@ -102,8 +119,8 @@ class NetworkInterface:
     @mask.setter
     def mask(self, value):
         with self._lock:
-            self._mask = value
-            self._reload()
+            if self._mask != value:
+                self._mask = value
 
     @property
     def route(self):
@@ -113,8 +130,8 @@ class NetworkInterface:
     @route.setter
     def route(self, value):
         with self._lock:
-            self._route = value
-            self._reload()
+            if self._route != value:
+                self._route = value
 
     def __getitem__(self, key):
         with self._lock:
@@ -127,7 +144,6 @@ class NetworkInterface:
         with self._lock:
             if hasattr(self.__class__, key) and isinstance(getattr(self.__class__, key), property):
                 setattr(self, key, value)
-                self._reload()
             else:
                 raise KeyError(f"'{key}' not found or not writable")
 
@@ -149,12 +165,39 @@ class EthernetInterface(NetworkInterface):
 
     TYPE = InterfaceTypes.INTERFACE_TYPE_ETHERNET
 
-    def __init__(self, device, adapter, config):
-        super().__init__(device, adapter, config)
+    def __init__(self, device, adapter, def_config):
+        super().__init__(device, adapter, def_config)
         self.static_ip_connection = f'static-ip-{self._device}'
         self.dynamic_ip_connection = f'dynamic-ip-{self._device}'
         self.dhcp_server_connection = f'dhcp-server-{self._device}'
         self._connection_type = self.ConnectionType.CONNECTION_TYPE_STATIC_IP
+        self._load_defaults()
+
+    def _load_defaults(self):
+        self._connection_type = self.ConnectionType.from_string(self._def_config.get('Ethernet', 'DefaultEthernetConnectionType'))
+        self._ip = self._def_config.get('Ethernet', 'DefaultEthernetIP')
+        self._mask = self._def_config.get('Ethernet', 'DefaultEthernetMask')
+        self._route = self._def_config.get('Ethernet', 'DefaultEthernetRoute')
+
+    def load_config(self, config):
+        with self._lock:
+            cfg = config[self._device]
+            self._connection_type.from_string(cfg["connection_type"])
+            self._ip = cfg["ip"]
+            self._mask = cfg["mask"]
+            self._route = cfg["route"]
+
+    def get_config(self):
+        with self._lock:
+            conf = {
+                self._device: {
+                    "connection_type": self._connection_type.value,
+                    "ip": self._ip,
+                    "mask": self._mask,
+                    "route": self._route
+                }
+            }
+            return conf
 
     def initialise(self):
         connections = self._adapter.connection()
@@ -207,7 +250,7 @@ class EthernetInterface(NetworkInterface):
             except Exception as e:
                 self._status_message(f'Error checking {self._device}: {e}', error=True)
 
-    def _reload(self):
+    def reload(self):
         try:
             mask_bits = IPAddress(self._mask).netmask_bits()
             if self._connection_type == self.ConnectionType.CONNECTION_TYPE_DISABLED:
@@ -281,12 +324,45 @@ class WiFiInterface(NetworkInterface):
 
     TYPE = InterfaceTypes.INTERFACE_TYPE_WIFI
 
-    def __init__(self, device, adapter: NMCliAdapter, config):
-        super().__init__(device, adapter, config)
+    def __init__(self, device, adapter: NMCliAdapter, def_config):
+        super().__init__(device, adapter, def_config)
         self._connection_type = self.ConnectionType.CONNECTION_TYPE_DISABLED
         self._ssid = ""
         self._passphrase = ""
         self._ip_read_only = True
+        self._load_defaults()
+
+    def _load_defaults(self):
+        self._connection_type = self.ConnectionType.from_string(self._def_config.get('WiFi', 'DefaultWiFiConnectionType'))
+        self._ip = self._def_config.get('WiFi', 'DefaultWiFiIP')
+        self._mask = self._def_config.get('WiFi', 'DefaultWiFiMask')
+        self._route = self._def_config.get('WiFi', 'DefaultWiFiRoute')
+        self._ssid = self._def_config.get('WiFi', 'DefaultWiFiSSID')
+        self._passphrase = self._def_config.get('WiFi', 'DefaultWiFiPassphrase')
+
+    def load_config(self, config):
+        with self._lock:
+            cfg = config[self._device]
+            self._connection_type.from_string(cfg["connection_type"])
+            self._ip = cfg["ip"]
+            self._mask = cfg["mask"]
+            self._route = cfg["route"]
+            self._ssid = cfg["ssid"]
+            self._passphrase = cfg["passphrase"]
+
+    def get_config(self):
+        with self._lock:
+            conf = {
+                self._device: {
+                    "connection_type": self._connection_type.value,
+                    "ip": self._ip,
+                    "mask": self._mask,
+                    "route": self._route,
+                    "ssid": self._ssid,
+                    "passphrase": self._passphrase
+                }
+            }
+            return conf
 
     @property
     def connection_type(self):
@@ -296,7 +372,8 @@ class WiFiInterface(NetworkInterface):
     @connection_type.setter
     def connection_type(self, value):
         with self._lock:
-            self._connection_type = self.ConnectionType.from_string(value)
+            if self._connection_type != value:
+                self._connection_type = self.ConnectionType.from_string(value)
 
     @property
     def ssid(self):
@@ -306,7 +383,8 @@ class WiFiInterface(NetworkInterface):
     @ssid.setter
     def ssid(self, value):
         with self._lock:
-            self._ssid = value
+            if self._ssid != value:
+                self._ssid = value
 
     @property
     def passphrase(self):
@@ -316,7 +394,8 @@ class WiFiInterface(NetworkInterface):
     @passphrase.setter
     def passphrase(self, value):
         with self._lock:
-            self._passphrase = value
+            if self._passphrase != value:
+                self._passphrase = value
 
     @property
     def scan(self):
@@ -353,7 +432,7 @@ class WiFiInterface(NetworkInterface):
                         logger.error(f'Error deleting Wi-Fi {self._device}: {e}')
         self._scan()
 
-    def _reload(self):
+    def reload(self):
         try:
             if self._connection_type == self.ConnectionType.CONNECTION_TYPE_DISABLED:
                 self._status_message('Disabling...')
@@ -424,11 +503,6 @@ class WiFiInterface(NetworkInterface):
 
 
 class APInterface(NetworkInterface):
-    DEFAULT_AP_INTERFACE_DEVICE = 'uap0'
-    DEFAULT_SSID = "ConfigurationAP"
-    DEFAULT_PASSPHRASE = ""
-    DEFAULT_AP_INTERFACE_MAC = "00:11:22:33:44:55"
-    DEFAULT_IP_FORWARD_ENABLE = 1
 
     class ConnectionType(str, Enum):
         CONNECTION_TYPE_DISABLED = "disabled"
@@ -444,16 +518,46 @@ class APInterface(NetworkInterface):
 
     TYPE = InterfaceTypes.INTERFACE_TYPE_WIFI_AP
 
-    def __init__(self, device, adapter: NMCliAdapter, config):
+    def __init__(self, device, adapter: NMCliAdapter, def_config):
         if not device:
-            device = config.getint('AP', 'APInterfaceDevice', fallback=self.DEFAULT_AP_INTERFACE_DEVICE)
-        super().__init__(device, adapter, config)
-        self._connection_type = self.ConnectionType.CONNECTION_TYPE_AP
-        self._ssid = self._config.get('AP', 'DefaultAPSSID', fallback=self.DEFAULT_SSID)
-        self._passphrase = self._config.get('AP', 'DefaultPassphrase', fallback=self.DEFAULT_PASSPHRASE)
-        self._mac = config.get('AP', 'APMAC', fallback=self.DEFAULT_AP_INTERFACE_MAC)
-        self._enable_ip_forward = config.getint('AP', 'IPForwardEnable', fallback=self.DEFAULT_IP_FORWARD_ENABLE)
+            device = def_config.getint('AP', 'APInterfaceDevice')
+        super().__init__(device, adapter, def_config)
         self._ip_read_only = False
+        self._load_defaults()
+
+    def _load_defaults(self):
+        self._ssid = self._def_config.get('AP', 'DefaultAPSSID')
+        self._passphrase = self._def_config.get('AP', 'DefaultAPPassphrase')
+        self._mac = self._def_config.get('AP', 'APMAC')
+        self._enable_ip_forward = self._def_config.getint('AP', 'IPForwardEnable')
+        self._connection_type = self.ConnectionType.from_string(self._def_config.get('AP', 'DefaultAPConnectionType'))
+        self._ip = self._def_config.get('AP', 'DefaultAPIP')
+        self._mask = self._def_config.get('AP', 'DefaultAPMask')
+        self._route = self._def_config.get('AP', 'DefaultAPRoute')
+
+    def load_config(self, config):
+        with self._lock:
+            cfg = config[self._device]
+            self._connection_type.from_string(cfg["connection_type"])
+            self._ip = cfg["ip"]
+            self._mask = cfg["mask"]
+            self._route = cfg["route"]
+            self._ssid = cfg["ssid"]
+            self._passphrase = cfg["passphrase"]
+
+    def get_config(self):
+        with self._lock:
+            conf = {
+                self._device: {
+                    "connection_type": self._connection_type.value,
+                    "ip": self._ip,
+                    "mask": self._mask,
+                    "route": self._route,
+                    "ssid": self._ssid,
+                    "passphrase": self._passphrase
+                }
+            }
+            return conf
 
     def refresh(self):
         with self._lock:
@@ -506,7 +610,8 @@ class APInterface(NetworkInterface):
     @connection_type.setter
     def connection_type(self, value):
         with self._lock:
-            self._connection_type = self.ConnectionType.from_string(value)
+            if self._connection_type != value:
+                self._connection_type = self.ConnectionType.from_string(value)
 
     @property
     def ssid(self):
@@ -516,7 +621,8 @@ class APInterface(NetworkInterface):
     @ssid.setter
     def ssid(self, value):
         with self._lock:
-            self._ssid = value
+            if self._ssid != value:
+                self._ssid = value
 
     @property
     def passphrase(self):
@@ -526,7 +632,8 @@ class APInterface(NetworkInterface):
     @passphrase.setter
     def passphrase(self, value):
         with self._lock:
-            self._passphrase = value
+            if self._passphrase != value:
+                self._passphrase = value
 
     def _reset_ap(self):
         # self._adapter.stop_dnsmasq()
@@ -544,7 +651,7 @@ class APInterface(NetworkInterface):
                 except Exception as e:
                     logger.error(f'Error deleting AP {self._device}: {e}')
 
-    def _reload(self):
+    def reload(self):
         try:
             if self._connection_type == self.ConnectionType.CONNECTION_TYPE_DISABLED:
                 self._status_message('Disabling...')
@@ -581,12 +688,18 @@ class APInterface(NetworkInterface):
 
 class InterfaceManager:
     UPDATE_PERIOD_S = 2
-    DEFAULT_ENABLE_AP_AFTER_PERIOD_S = 30
 
-    def __init__(self, config):
+    def __init__(self, def_config):
+        self._conf = {}
+        self.last_disconnected_time = time.time()
+        self._enable_ap_after_period_s = def_config.getint('Interfaces', 'EnableAPAfterBeingDisconnectedForSeconds')
+        self._ap_always_on = def_config.getboolean('Interfaces', 'AccessPointAlwaysOn')
+        self._use_sudo = def_config.getboolean('Interfaces', 'UseSudo')
+        self._conf_file = def_config.get('Global', 'ParametersConfigFile')
+        self.ap_interface_idx = 0
         self.previous_connected_state = True
-        self.config = config
-        self.adapter = NMCliAdapter()
+        self.def_config = def_config
+        self.adapter = NMCliAdapter(use_sudo=self._use_sudo)
         self.interfaces = []
         self.detect_interfaces()
         self.initialise()
@@ -599,20 +712,24 @@ class InterfaceManager:
         ap_found = False
         for device in devices:
             if device.device_type == 'wifi':
-                interface = WiFiInterface(device.device, self.adapter, config=self.config)
+                interface = WiFiInterface(device.device, self.adapter, def_config=self.def_config)
                 self.interfaces.append(interface)
             elif device.device_type == 'ethernet':
-                interface = EthernetInterface(device.device, self.adapter, config=self.config)
+                interface = EthernetInterface(device.device, self.adapter, def_config=self.def_config)
                 self.interfaces.append(interface)
             elif device.device_type == '__ap':
-                ap_found = True
-                interface = APInterface(device.device, self.adapter, config=self.config)
-                self.interfaces.append(interface)
+                if not ap_found:
+                    ap_found = True
+                    interface = APInterface(device.device, self.adapter, def_config=self.def_config)
+                    self.interfaces.append(interface)
+                else:
+                    logger.warning(f"More than one AP device found: {device.device}, skip")
             else:
                 logger.info(f"Skip device {device.device} of unknown type {device.device_type}")
         if not ap_found:
             logger.info("AP interface not found, first run? Creating the interface...")
-            interface = APInterface("", self.adapter, config=self.config)
+            interface = APInterface("", self.adapter, def_config=self.def_config)
+            self.ap_interface_idx = len(self.interfaces)
             self.interfaces.append(interface)
 
     def refresh_interfaces(self):
@@ -626,18 +743,49 @@ class InterfaceManager:
                     connected = True
         if connected != self.previous_connected_state:
             if connected:
-                if time.time() - self.last_connected_time
+                if not self._ap_always_on:
+                    self.interfaces[self.ap_interface_idx].connection_type = APInterface.ConnectionType.CONNECTION_TYPE_DISABLED.value
             else:
                 self.last_disconnected_time = time.time()
         self.previous_connected_state = connected
-        if time.time() - self.last_disconnected_time > self.ENABLE_AP_AFTER_PERIOD_S:
-            pass
+        if time.time() - self.last_disconnected_time > self._enable_ap_after_period_s:
+            self.interfaces[self.ap_interface_idx].connection_type = APInterface.ConnectionType.CONNECTION_TYPE_AP.value
 
     def initialise(self):
+        self._conf = json.load(self._conf_file)
         for interface in self.interfaces:
-            self.interfaces[interface].initialise()
+            self.interfaces[interface].initialise(self._conf)
+
+    @staticmethod
+    def atomic_write(file_path, data, mode='w'):
+        dir_name = os.path.dirname(file_path)
+        with tempfile.NamedTemporaryFile(mode=mode, dir=dir_name, delete=False) as temp_file:
+            temp_file.write(data)
+            temp_name = temp_file.name
+        os.replace(temp_name, file_path)
+        logger.info(f"Configuration saved to {file_path}")
+
+    def save(self):
+        data = json.dumps(self.get_conf())
+        self.atomic_write(self._conf_file, data)
 
     def periodic_update(self):
         while True:
             self.refresh_interfaces()
             time.sleep(self.UPDATE_PERIOD_S)
+
+    def reload(self):
+        for interface in self.interfaces:
+            self.interfaces[interface].reload()
+
+    def get_conf(self):
+        self._conf = {}
+        for interface in self.interfaces:
+            self._conf |= self.interfaces[interface].get_conf()
+        return self._conf
+
+    def get_status(self):
+        status = {}
+        for interface in self.interfaces:
+            status |= self.interfaces[interface].get_status()
+        return status
