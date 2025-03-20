@@ -22,11 +22,11 @@ USE_FULL_BACKTRACE = True
 DEFAULT_CONFIG = """
 [Global]
 # Configuration will be saved to this file
-ParametersConfigFile = /home/monitoraudio/network_configurator/net_parameters.json
+ParametersConfigFile = /etc/network_configurator/net_parameters.json
 
 # Don't execute anything that can change the existing configuration. 
 # The app will still retrieve information about the real interfaces
-DryRun = True
+DryRun = False
 
 [RemoteHost]
 # The commands can be run on a remote host, this is useful
