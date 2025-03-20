@@ -1,5 +1,4 @@
 import logging
-import os
 import subprocess
 import nmcli
 from nmcli import SystemCommand, ConnectionControl, DeviceControl, GeneralControl, NetworkingControl, RadioControl
@@ -11,7 +10,13 @@ logger.setLevel(logging.INFO)
 
 class HostController:
 
-    def __init__(self):
+    def __init__(self,
+                 remote_host_port: int = 22,
+                 remote_host_ssh_key: str = "",
+                 remote_host_hostname: str = "localhost"):
+        self.remote_host_port = remote_host_port
+        self.remote_host_ssh_key = remote_host_ssh_key
+        self.remote_host_hostname = remote_host_hostname
         self.client: SSHClient | None = None
         self.init_nmcli_interface()
 
@@ -20,9 +25,10 @@ class HostController:
             try:
                 self.client = SSHClient()
                 self.client.load_system_host_keys()
-                ssh_port = int(os.getenv('HOST_SSH_PORT'))
-                key_file = os.getenv('HOST_SSH_KEY_FILE')
-                self.client.connect(hostname='localhost', port=ssh_port, key_filename=key_file)
+                ssh_port = int(self.remote_host_port)
+                key_file = self.remote_host_ssh_key
+                hostname = self.remote_host_hostname
+                self.client.connect(hostname=hostname, port=ssh_port, key_filename=key_file)
                 logger.info('SSH Host connected')
             except Exception as e:
                 logger.error(f'Error connecting to the host: {e}')
