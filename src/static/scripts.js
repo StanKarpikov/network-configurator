@@ -10,50 +10,36 @@ async function fetchData(url) {
   }
 }
 
-function createWifiList(wifiNetworks) {
-  return wifiNetworks.map(network => `
-    <div class="wifi-item">
-      <span>${network.ssid} (Signal: ${network.signal}%)</span>
-      <button onclick="connectToWifi('${network.ssid}')">Connect</button>
-    </div>
-  `).join('');
+function wifiScanChanged(intf)
+{
+    const selectElement = document.getElementById(`wifi-scan-select-${intf}`);
+    const wifiSSID = document.getElementById(`ssid-${intf}`);
+    wifiSSID.value = selectElement.value;
 }
 
-function validateIP(ip) {
-  const regex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(\1)\.(\1)\.(\1)$/;
-  return regex.test(ip);
-}
-
-async function wifiScan(interfaceName) {
-    const scanResult = await fetchData(`/api/param/${interfaceName}/scan`);
-    const wifiScanResults = document.getElementById(`scan-list-${interfaceName}`);
-
+async function wifiScan(intf) {
+    const scanResult = await fetchData(`/api/param/${intf}/scan`);
+    const wifiScanResults = document.getElementById(`scan-list-${intf}`);
     wifiScanResults.innerHTML = '';
-
     const selectElement = document.createElement('select');
-
+    selectElement.id=`wifi-scan-select-${intf}`;
+    selectElement.onchange = () => wifiScanChanged(intf);
     for (const ssid of scanResult) {
         const optionElement = document.createElement('option');
         optionElement.value = ssid;
         optionElement.textContent = ssid;
         selectElement.appendChild(optionElement);
     }
-
     wifiScanResults.appendChild(selectElement);
 }
 
-async function applyConfig(interfaceName) {
-  const ip = document.getElementById(`ip-${interfaceName}`).value;
-  const mask = document.getElementById(`mask-${interfaceName}`).value;
-  const router = document.getElementById(`router-${interfaceName}`).value;
-
-  if (!validateIP(ip) || !validateIP(mask) || !validateIP(router)) {
-    alert('Invalid IP, Mask, or Router address. Please check again.');
-    return;
-  }
+async function applyConfig(intf) {
+  const ip = document.getElementById(`ip-${intf}`).value;
+  const mask = document.getElementById(`mask-${intf}`).value;
+  const router = document.getElementById(`router-${intf}`).value;
 
   const data = { ip, mask, router };
-  await fetch(`/api/param/${interfaceName}/config`, { method: 'POST', body: JSON.stringify(data) });
+  await fetch(`/api/param/${intf}/config`, { method: 'POST', body: JSON.stringify(data) });
   alert('Configuration applied successfully.');
 }
 
@@ -84,15 +70,16 @@ async function loadInterfaces(interfaces, config, status)
               ? '<option value="disabled">Disabled</option><option value="station">Station</option><option value="ap">AP</option>'
               : '<option value="disabled">Disabled</option><option value="static_ip">Static IP</option><option value="dynamic_ip">Dynamic IP</option><option value="dhcp">DHCP</option>';
 
+    const ipPattern = "^((25[0-5]|(2[0-4]|1\\d|[1-9]|)\\d)\\.?\\b){4}$"
     container.innerHTML += `
       <div class="interface-block">
         <h3 id="header-${intf}">${intf} - ${ifaceType}</h3>
         <p id="status-message-${intf}"></p>
-        <label>Connection Type: <select id="connection-${intf}">${connectionOptions}</select></label>
+        <label>Connection Type: <select id="connection-${intf}" onchange="connection_type_changed('${intf}')" >${connectionOptions}</select></label>
         ${wifiSection}
-        <label>IP: <input id="ip-${intf}" type="text" value="0.0.0.0" /></label>
-        <label>Mask: <input id="mask-${intf}" type="text" value="0.0.0.0" /></label>
-        <label>Router: <input id="router-${intf}" type="text" value="0.0.0.0" /></label>
+        <label>IP: <input class="ip" id="ip-${intf}" type="text" minlength="7" maxlength="15" size="15" pattern="${ipPattern}" value="0.0.0.0" /></label>
+        <label>Mask: <input class="ip" id="mask-${intf}" type="text" minlength="7" maxlength="15" size="15" pattern="${ipPattern}" value="0.0.0.0" /></label>
+        <label>Router: <input class="ip" id="router-${intf}" type="text" minlength="7" maxlength="15" size="15" pattern="${ipPattern}" value="0.0.0.0" /></label>
         <button onclick="applyConfig('${intf}')">Apply</button>
       </div>
     `;
@@ -137,7 +124,8 @@ async function refresh(interfaces, config, status) {
     {
         const ssid = document.getElementById(`ssid-${intf}`);
         const passphrase =document.getElementById(`passphrase-${intf}`);
-        if(focusedElement === ssid || focusedElement === passphrase)
+        const ssidSelected = document.getElementById(`wifi-scan-select-${intf}`);
+        if(focusedElement === ssid || focusedElement === passphrase || focusedElement === ssidSelected)
         {
             edited = true;
         }
@@ -171,10 +159,10 @@ async function connectToWifi(ssid) {
   }
 }
 
-async function connectToWifiManual(interfaceName) {
-  const ssid = document.getElementById(`ssid-${interfaceName}`).value;
-  const password = document.getElementById(`password-${interfaceName}`).value;
-  await fetch(`/api/param/${interfaceName}/wifi/connect`, { method: 'POST', body: JSON.stringify({ ssid, password }) });
+async function connectToWifiManual(intf) {
+  const ssid = document.getElementById(`ssid-${intf}`).value;
+  const password = document.getElementById(`password-${intf}`).value;
+  await fetch(`/api/param/${intf}/wifi/connect`, { method: 'POST', body: JSON.stringify({ ssid, password }) });
   alert(`Connecting to ${ssid}`);
 }
 
