@@ -30,6 +30,7 @@ class NetworkInterface:
         self._route = ""
         self._status_message_str = ""
         self._status_error = False
+        self._update_pending = False
 
     def _status_message(self, message, error=False):
         logger.info(f"Status Message {self._device}: {message}")

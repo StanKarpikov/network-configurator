@@ -18,13 +18,13 @@ logger.setLevel(logging.INFO)
 
 
 class InterfaceManager:
-    UPDATE_PERIOD_S = 2
 
     def __init__(self, def_config):
         self._conf = {}
         self.last_disconnected_time = time.time()
         self._enable_ap_after_period_s = def_config.getint('Interfaces', 'EnableAPAfterBeingDisconnectedForSeconds')
         self._ap_always_on = def_config.getboolean('Interfaces', 'AccessPointAlwaysOn')
+        self._update_period_s = def_config.getfloat('Interfaces', 'UpdatePeriodSec')
         self._use_sudo = def_config.getboolean('Interfaces', 'UseSudo')
         self._use_whitelist = def_config.getboolean('Interfaces', 'InterfaceUseWhitelist')
         self._whitelist = def_config.get('Interfaces', 'InterfaceWhitelist')
@@ -109,7 +109,9 @@ class InterfaceManager:
                 self.last_disconnected_time = time.time()
         self.previous_connected_state = connected
         if time.time() - self.last_disconnected_time > self._enable_ap_after_period_s:
-            self.interfaces[self.ap_interface_idx].connection_type = APInterface.ConnectionType.CONNECTION_TYPE_AP.value
+            if self.interfaces[self.ap_interface_idx].connection_type != APInterface.ConnectionType.CONNECTION_TYPE_AP.value:
+                self.interfaces[self.ap_interface_idx].connection_type = APInterface.ConnectionType.CONNECTION_TYPE_AP.value
+                self.interfaces[self.ap_interface_idx].reload()
 
     def initialise(self):
         logger.info(f"Initialising from configuration file {self._conf_file}")
@@ -125,7 +127,7 @@ class InterfaceManager:
                 logger.error("Failed to load saved configuration, have to revert to the defaults")
                 self._conf = {}
         for interface in self.interfaces:
-            interface.load_config(self._conf)
+            interface.load_config(self._conf, initialise=True)
             interface.initialise()
 
     @staticmethod
@@ -147,10 +149,15 @@ class InterfaceManager:
                 self.refresh_interfaces()
             except Exception as e:
                 logger.error(f"Exception while refreshing: {e}")
-            time.sleep(self.UPDATE_PERIOD_S)
+            time.sleep(self._update_period_s)
 
     def reload(self):
         for interface in self.interfaces:
+            interface.reload()
+
+    def load_config(self, config, initialise=False):
+        for interface in self.interfaces:
+            interface.load_config(config, initialise=initialise)
             interface.reload()
 
     def get_conf(self):

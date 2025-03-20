@@ -43,6 +43,7 @@ Port = 50000
 
 [Interfaces]
 EnableAPAfterBeingDisconnectedForSeconds = 30
+UpdatePeriodSec = 5
 
 # Some commands require elevated priveleges to run (iw, ip, etc.). 
 # Add the users to a sudoers file with NOPASSWD option and set `UseSudo = True`,
@@ -55,6 +56,7 @@ InterfaceWhitelist = []
 
 [AP]
 UseDedicatedAP = True
+APHideInUI = True
 APInterfaceDevice = uap0
 DefaultAPSSID = ConfigurationTest
 DefaultAPPassphrase = 012345678
@@ -99,6 +101,8 @@ class NetworkConfigurationService:
         self.manager = InterfaceManager(def_config=def_config)
         self._start_server = def_config.getboolean('Server', 'EnableServer')
         self._port = def_config.getint('Server', 'Port')
+        self._ap_hide_in_ui = def_config.getboolean('AP', 'APHideInUI')
+        self._ap_interface = def_config.get('AP', 'APInterfaceDevice')
         if self._start_server:
             self.start_server()
         else:
@@ -115,48 +119,67 @@ class NetworkConfigurationService:
         def index():
             return app.send_static_file('index.html')
 
-        @app.route('/api/update', methods=['POST'])
-        def update_control():
-            self.manager.reload()
-            return "", 200
-
         @app.route('/api/status', methods=['GET'])
         def status_control():
             return jsonify(self.manager.get_status()), 200
 
-        @app.route('/api/config', methods=['GET'])
+        @app.route('/api/config', methods=['GET', 'POST'])
         def config_control():
-            return jsonify(self.manager.get_conf()), 200
+            if request.method == 'GET':
+                conf = self.manager.get_conf()
+                if self._ap_hide_in_ui:
+                    conf.pop(self._ap_interface)
+                return jsonify(conf), 200
+            elif request.method == 'POST':
+                self.manager.load_config(request.get_json())
+                return jsonify("OK"), 200
+
+        @app.route('/api/<interface_id>/config', methods=['GET', 'POST'])
+        def config_interface_control(interface_id):
+            try:
+                for interface in self.manager.interfaces:
+                    if interface_id == interface.device:
+                        if request.method == 'GET':
+                            return jsonify(interface.get_conf()), 200
+                        elif request.method == 'POST':
+                            config = request.get_json()
+                            interface.load_config({interface_id: config})
+                            return jsonify("OK"), 200
+                return jsonify({'error': f'Interface {interface_id} not found. Acceptable interfaces are: {", ".join(self.manager.interfaces)}'}), 404
+            except Exception as e:
+                return jsonify({'error': f'{e}'}), 500
 
         @app.route('/api/interfaces', methods=['GET'])
         def interfaces_control():
             interfaces = []
             for interface in self.manager.interfaces:
+                if self._ap_hide_in_ui and interface.device == self._ap_interface:
+                    continue
                 interfaces.append(interface.device)
             return jsonify(interfaces), 200
 
         @app.route('/api/param/<interface_id>/<parameter>', methods=['GET', 'POST'])
         def parameter_control(interface_id: str, parameter: str):
-            for interface in self.manager.interfaces:
-                if interface_id == interface.device:
-                    if parameter in interface.parameters():
-                        if request.method == 'GET':
-                            print(interface[parameter])
-                            return jsonify(interface[parameter]), 200
-                        elif request.method == 'POST':
-                            try:
-                                interface[parameter] = request.form
+            try:
+                for interface in self.manager.interfaces:
+                    if interface_id == interface.device:
+                        if parameter in interface.parameters():
+                            if request.method == 'GET':
                                 return jsonify(interface[parameter]), 200
-                            except Exception as e:
-                                return jsonify({'error': f'Could not process request, internal error: {e}'}), 500
+                            elif request.method == 'POST':
+                                try:
+                                    interface[parameter] = request.form.to_dict(flat=False)
+                                    return jsonify(interface[parameter]), 200
+                                except Exception as e:
+                                    return jsonify({'error': f'Could not process request, internal error: {e}'}), 500
+                            else:
+                                return jsonify({'error': f'Method {request.method} not allowed'}), 405
                         else:
-                            return jsonify({'error': f'Method {request.method} not allowed'}), 405
-                    else:
-                        return jsonify({'error': f'Unknown parameter {parameter} for interface {interface_id}. '
-                                                 f'Acceptable parameters are: {", ".join(interface.parameters())}'}), 404
-                return jsonify({'error': f'Interface {interface_id} not found'}), 404
-            else:
-                return jsonify({'error': f'Unknown interface {interface_id}. Acceptable interfaces are: {", ".join(self.manager.interfaces)}'}), 404
+                            return jsonify({'error': f'Unknown parameter {parameter} for interface {interface_id}. '
+                                                     f'Acceptable parameters are: {", ".join(interface.parameters())}'}), 404
+                    return jsonify({'error': f'Interface {interface_id} not found. Acceptable interfaces are: {", ".join(self.manager.interfaces)}'}), 404
+            except Exception as e:
+                return jsonify({'error': f'{e}'}), 500
 
         app.run(debug=False, port=self._port)
 

@@ -37,19 +37,25 @@ class EthernetInterface(NetworkInterface):
         self._mask = self._def_config.get('Ethernet', 'DefaultEthernetMask')
         self._route = self._def_config.get('Ethernet', 'DefaultEthernetRoute')
 
-    def load_config(self, config):
+    def load_config(self, config, initialise=False):
         with self._lock:
             try:
                 cfg = config[self._device]
-                if not all(name in cfg for name in ["connection_type", "ip", "mask", "route", "ssid", "passphrase"]):
-                    raise Exception("Not all parameters saved in the configuration, revert to defaults")
+                parameters = ["connection_type", "ip", "mask", "route"]
+                for parameter in parameters:
+                    if parameter not in cfg:
+                        raise Exception(f"Configuration missing parameters: {parameter}")
                 self._connection_type.from_string(cfg["connection_type"])
                 self._ip = cfg["ip"]
                 self._mask = cfg["mask"]
                 self._route = cfg["route"]
                 logger.info(f"Read parameters for {self._device}: {self._connection_type} | IP {self._ip} | Mask {self._mask} | Route {self._route}")
             except Exception as e:
-                logger.warning(f"No configuration for {self._device} found ({e}), use defaults")
+                if initialise:
+                    logger.warning(f"No configuration for {self._device} found ({e}), use defaults")
+                else:
+                    logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
+                    raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
 
     def get_config(self):
         with self._lock:
@@ -88,6 +94,8 @@ class EthernetInterface(NetworkInterface):
     def refresh(self):
         with self._lock:
             try:
+                if self._update_pending:
+                    self.reload()
                 self._status_message(self.status)
                 iface = self._adapter.ifconfig(self._device)
 
@@ -112,59 +120,66 @@ class EthernetInterface(NetworkInterface):
                 self._status_message(f'Error checking {self._device}: {e}', error=True)
 
     def reload(self):
-        try:
-            mask_bits = IPAddress(self._mask).netmask_bits()
-            if self._connection_type == self.ConnectionType.CONNECTION_TYPE_DISABLED:
-                self._status_message('Disabling...')
-                self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.dynamic_ip_connection)
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.static_ip_connection)
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.dhcp_server_connection)
-                self._ip_read_only = True
-                self._status_message('Disabled')
-            elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_STATIC_IP:
-                self._status_message('Setting static IP...')
-                self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.dynamic_ip_connection)
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.dhcp_server_connection)
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.method': 'manual'})
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.addresses': f'{self._ip}/{mask_bits}'})
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.gateway': self._route})
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'yes'})
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.dns': "8.8.8.8 4.4.4.4"})
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv6.method': 'disabled'})
-                self._adapter.connection_up(name=self.static_ip_connection)
-                self._ip_read_only = False
-                self._status_message('Configured')
-            elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_DYNAMIC_IP:
-                self._status_message('Setting dynamic IP...')
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.static_ip_connection)
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.dhcp_server_connection)
-                self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'ipv4.method': 'auto'})
-                self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'ipv6.method': 'auto'})
-                self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'yes'})
-                self._adapter.connection_up(name=self.dynamic_ip_connection)
-                self._ip_read_only = True
-                self._status_message('Configured')
-            elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_DHCP_SERVER:
-                self._status_message('Setting DHCP server...')
-                self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.dynamic_ip_connection)
-                self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'no'})
-                self._adapter.connection_down(name=self.static_ip_connection)
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'ipv6.method': 'disabled'})
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'ipv4.method': 'shared'})
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'ipv4.addresses': f'{self._ip}/{mask_bits}'})
-                self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'yes'})
-                self._adapter.connection_up(name=self.dhcp_server_connection)
-                self._ip_read_only = False
-                self._status_message('Configured')
-            else:
-                self._status_message('Unknown network type', error=True)
-        except Exception as e:
-            self._status_message(f"LAN: {e}", error=True)
+        with self._lock():
+            try:
+                self._update_pending = True
+                mask_bits = IPAddress(self._mask).netmask_bits()
+                if self._connection_type == self.ConnectionType.CONNECTION_TYPE_DISABLED:
+                    self._status_message('Disabling...')
+                    self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.dynamic_ip_connection)
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.static_ip_connection)
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.dhcp_server_connection)
+                    self._ip_read_only = True
+                    self._update_pending = False
+                    self._status_message('Disabled')
+                elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_STATIC_IP:
+                    self._status_message('Setting static IP...')
+                    self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.dynamic_ip_connection)
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.dhcp_server_connection)
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.method': 'manual'})
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.addresses': f'{self._ip}/{mask_bits}'})
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.gateway': self._route})
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'yes'})
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv4.dns': "8.8.8.8 4.4.4.4"})
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'ipv6.method': 'disabled'})
+                    self._adapter.connection_up(name=self.static_ip_connection)
+                    self._ip_read_only = False
+                    self._update_pending = False
+                    self._status_message('Configured')
+                elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_DYNAMIC_IP:
+                    self._status_message('Setting dynamic IP...')
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.static_ip_connection)
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.dhcp_server_connection)
+                    self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'ipv4.method': 'auto'})
+                    self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'ipv6.method': 'auto'})
+                    self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'yes'})
+                    self._adapter.connection_up(name=self.dynamic_ip_connection)
+                    self._ip_read_only = True
+                    self._update_pending = False
+                    self._status_message('Configured')
+                elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_DHCP_SERVER:
+                    self._status_message('Setting DHCP server...')
+                    self._adapter.connection_modify(name=self.dynamic_ip_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.dynamic_ip_connection)
+                    self._adapter.connection_modify(name=self.static_ip_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self.static_ip_connection)
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'ipv6.method': 'disabled'})
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'ipv4.method': 'shared'})
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'ipv4.addresses': f'{self._ip}/{mask_bits}'})
+                    self._adapter.connection_modify(name=self.dhcp_server_connection, options={'connection.autoconnect': 'yes'})
+                    self._adapter.connection_up(name=self.dhcp_server_connection)
+                    self._ip_read_only = False
+                    self._update_pending = False
+                    self._status_message('Configured')
+                else:
+                    self._update_pending = False
+                    self._status_message('Unknown network type', error=True)
+            except Exception as e:
+                self._status_message(f"LAN: {e}", error=True)

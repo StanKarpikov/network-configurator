@@ -1,3 +1,4 @@
+import re
 import subprocess
 import nmcli
 from ifconfigparser import IfconfigParser
@@ -148,3 +149,13 @@ class NMCliAdapter:
         interfaces = IfconfigParser(console_output=ifconfig_output)
         iface = interfaces.get_interface(name=device)
         return iface
+
+    def iw_dev_link(self, device):
+        iw_output = self.run_command(f'iw dev {device} link')
+        match = re.search(r"SSID:\s*(.+)", iw_output)
+        if match:
+            ssid = match.group(1)
+        else:
+            ssid = ""
+        return ssid
+
