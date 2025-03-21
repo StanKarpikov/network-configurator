@@ -29,7 +29,7 @@ class NMCliAdapter:
         if self._use_sudo:
             prefix = 'sudo '
         if self._remote_host:
-            self._host.run_host_command("killall dnsmasq")
+            self._host.run_host_command(f'{prefix}{command}')
         else:
             return subprocess.getoutput(f'{prefix}{command}')
 
@@ -58,7 +58,7 @@ class NMCliAdapter:
     def connection_add(self, conn_type, options, ifname, autoconnect):
         if self._dry_run:
             return
-        return nmcli.connection.add(conn_type, options, ifname, autoconnect)
+        return nmcli.connection.add(conn_type=conn_type, options=options, ifname=ifname, autoconnect=autoconnect)
 
     @staticmethod
     def device_wifi(ifname):
