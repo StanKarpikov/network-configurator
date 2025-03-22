@@ -68,10 +68,10 @@ class NMCliAdapter:
         logger.info(f"nmcli.connection.add conn_type={conn_type}, options={options}, ifname={ifname}, autoconnect={autoconnect}, ssid={ssid}")
         if self._dry_run:
             return
-        if ssid is not None:
+        if ssid is None:
             return nmcli.connection.add(conn_type=conn_type, options=options, ifname=ifname, autoconnect=autoconnect)
         else:
-            return nmcli.connection.add(conn_type=conn_type, options=options, ifname=ifname, autoconnect=autoconnect, ssid=ssid)
+            return nmcli.connection.add(conn_type=conn_type, options=options | {"ssid": ssid}, ifname=ifname, autoconnect=autoconnect)
 
     @staticmethod
     def device_wifi(ifname):
@@ -197,4 +197,3 @@ class NMCliAdapter:
         else:
             ssid = ""
         return ssid
-

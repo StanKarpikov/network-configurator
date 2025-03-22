@@ -59,10 +59,10 @@ class WiFiInterface(NetworkInterface):
                 self._ssid = cfg["ssid"]
                 self._passphrase = cfg["passphrase"]
                 logger.info(f"Read parameters for {self._device}: {self._connection_type} | IP {self._ip} | Mask {self._mask} | Route {self._route} | SSID {self._ssid}")
+                self.reload()
             except Exception as e:
                 logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
                 raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
-            self.reload()
 
     def get_config(self):
         with self._lock:
@@ -85,6 +85,11 @@ class WiFiInterface(NetworkInterface):
         enabled = False
         for connection in connections:
             if connection.name == self._hotspot_connection:
+                if hotspot_found:
+                    logger.warning(f"More than one connection {connection.name} found, remove")
+                    self._adapter.connection_down(name=connection.name, wait=self.WAIT_FOR_CONNECTION_UP_S, ignore_error=True)
+                    self._adapter.connection_delete(name=connection.name)
+                    continue
                 hotspot_found = True
                 status = self._adapter.connection_show(name=connection.name)
                 logger.info(f"Found connection {connection.name}, status autoconnect {status['connection.autoconnect']}")
@@ -107,6 +112,7 @@ class WiFiInterface(NetworkInterface):
         if not hotspot_found:
             logger.info(f"{self._device} Hotspot connection {self._hotspot_connection} not found, create")
             self._adapter.connection_add(conn_type='wifi', options={'con-name': self._hotspot_connection}, ifname=self._device, autoconnect=False, ssid=self._ssid)
+            self.reload()
 
         self.refresh()
 
@@ -195,6 +201,7 @@ class WiFiInterface(NetworkInterface):
                         self._adapter.connection_modify(name=self._hotspot_connection, options={'connection.autoconnect': 'no'})
                         self._adapter.connection_down(name=self._hotspot_connection, wait=self.WAIT_FOR_CONNECTION_UP_S, ignore_error=True)
                         self._status_message('Power on...')
+                        self._scan()
                         self._adapter.ip_link_set_up(self._device)
                         time.sleep(2)
                         for tries in range(2):
@@ -229,11 +236,14 @@ class WiFiInterface(NetworkInterface):
                                 self._status_message(f'Creating access point try {tries}...')
                             else:
                                 self._status_message('Creating access point...')
-                            self._adapter.device_wifi_hotspot(con_name=self._hotspot_connection, ifname=self._device, ssid=f'{self._ssid}', password=f'{self._passphrase}')
-                            self._adapter.connection_modify(name=self._hotspot_connection, options={'ipv4.method': 'shared'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'connection.interface-name': self._device})
                             self._adapter.connection_modify(name=self._hotspot_connection, options={'connection.autoconnect': 'yes'})
-                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless.mode': 'wpa-psk'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless.mode': 'ap'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless.ssid': self._ssid})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless-security.key-mgmt': 'wpa-psk'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless-security.psk': self._passphrase})
                             self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless-security.pmf': 'disable'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'ipv4.method': 'shared'})
                             self._adapter.connection_up(name=self._hotspot_connection, wait=self.WAIT_FOR_CONNECTION_UP_S)
 
                             # Alternative:
@@ -276,9 +286,10 @@ class WiFiInterface(NetworkInterface):
 
                 if self._connection_type == self.ConnectionType.CONNECTION_TYPE_STATION:
                     self._ssid = self._adapter.iw_dev_link(self._device)
-                    self._ip = ipv4_addr
-                    self._mask = ipv4_mask
-                    self._route = ipv4_bcast
+
+                self._ip = ipv4_addr
+                self._mask = ipv4_mask
+                self._route = ipv4_bcast
 
             except Exception as e:
                 self._status_message(f'Error checking {self._device}: {e}', error=True)

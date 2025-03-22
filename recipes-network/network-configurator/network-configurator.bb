@@ -1,10 +1,10 @@
 SUMMARY = "Network Configurator"
 LICENSE = "CLOSED"
 
-DEPENDS = " python3-nmcli \
-            python3-ifconfig-parser \
-            python3-netaddr \
-            "
+RDEPENDS:${PN} = " python3-nmcli \
+                   python3-ifconfig-parser \
+                   python3-netaddr \
+                   "
 
 inherit systemd pkgconfig
 

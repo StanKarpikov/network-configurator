@@ -51,6 +51,7 @@ class EthernetInterface(NetworkInterface):
                 self._mask = cfg["mask"]
                 self._route = cfg["route"]
                 logger.info(f"Update parameters for {self._device}: {self._connection_type} | IP {self._ip} | Mask {self._mask} | Route {self._route}")
+                self.reload()
             except Exception as e:
                 logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
                 raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
@@ -78,6 +79,11 @@ class EthernetInterface(NetworkInterface):
         enabled = False
         for connection in connections:
             if connection.name == self.static_ip_connection:
+                if static_ip_found:
+                    logger.warning(f"More than one connection {connection.name} found, remove")
+                    self._adapter.connection_down(name=connection.name, wait=self.WAIT_FOR_CONNECTION_UP_S)
+                    self._adapter.connection_delete(name=connection.name)
+                    continue
                 static_ip_found = True
                 status = self._adapter.connection_show(name=connection.name)
                 logger.info(f"Found connection {connection.name}, status autoconnect {status['connection.autoconnect']}")
@@ -85,6 +91,11 @@ class EthernetInterface(NetworkInterface):
                     enabled = True
                     self._connection_type = self.ConnectionType.CONNECTION_TYPE_STATIC_IP
             elif connection.name == self.dynamic_ip_connection:
+                if dynamic_ip_found:
+                    logger.warning(f"More than one connection {connection.name} found, remove")
+                    self._adapter.connection_down(name=connection.name, wait=self.WAIT_FOR_CONNECTION_UP_S)
+                    self._adapter.connection_delete(name=connection.name)
+                    continue
                 dynamic_ip_found = True
                 status = self._adapter.connection_show(name=connection.name)
                 logger.info(f"Found connection {connection.name}, status autoconnect {status['connection.autoconnect']}")
@@ -92,6 +103,11 @@ class EthernetInterface(NetworkInterface):
                     enabled = True
                     self._connection_type = self.ConnectionType.CONNECTION_TYPE_DYNAMIC_IP
             elif connection.name == self.dhcp_server_connection:
+                if dhcp_found:
+                    logger.warning(f"More than one connection {connection.name} found, remove")
+                    self._adapter.connection_down(name=connection.name, wait=self.WAIT_FOR_CONNECTION_UP_S)
+                    self._adapter.connection_delete(name=connection.name)
+                    continue
                 dhcp_found = True
                 status = self._adapter.connection_show(name=connection.name)
                 logger.info(f"Found connection {connection.name}, status autoconnect {status['connection.autoconnect']}")

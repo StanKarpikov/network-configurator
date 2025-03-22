@@ -51,6 +51,7 @@ UseSudo = False
 AccessPointAlwaysOn = True
 InterfaceUseWhitelist = False
 InterfaceWhitelist = []
+CheckEthernetForConnection = False
 
 [AP]
 UseDedicatedAP = False
