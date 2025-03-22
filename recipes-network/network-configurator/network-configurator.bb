@@ -9,7 +9,7 @@ RDEPENDS:${PN} = " python3-nmcli \
 inherit systemd pkgconfig
 
 SYSTEMD_PACKAGES += "${PN}"
-SYSTEMD_AUTO_ENABLE:${PN} = "disable"
+SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 SYSTEMD_SERVICE:${PN} = "network-configurator.service"
 
 FILESEXTRAPATHS:prepend = "${THISDIR}/files:"
