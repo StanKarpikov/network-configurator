@@ -115,7 +115,7 @@ async function loadInterfaces(interfaces, config, status) {
     const connectionOptions =
       ifaceType === "wifi"
         ? '<option value="disabled">Disabled</option><option value="station">Station</option><option value="ap">AP</option>'
-        : '<option value="disabled">Disabled</option><option value="static_ip">Static IP</option><option value="dynamic_ip">Dynamic IP</option><option value="dhcp">DHCP</option>';
+        : '<option value="disabled">Disabled</option><option value="static_ip">Static IP</option><option value="dynamic_ip">Dynamic IP</option><option value="dhcp_server">DHCP</option>';
 
     const ipPattern = "^((25[0-5]|(2[0-4]|1\\d|[1-9]|)\\d)\\.?\\b){4}$";
     container.innerHTML += `

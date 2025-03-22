@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 class APInterface(NetworkInterface):
+    WAIT_FOR_CONNECTION_UP_S = 5
 
     class ConnectionType(str, Enum):
         CONNECTION_TYPE_DISABLED = "disabled"
@@ -43,7 +44,7 @@ class APInterface(NetworkInterface):
         self._mask = self._def_config.get('AP', 'DefaultAPMask')
         self._route = self._def_config.get('AP', 'DefaultAPRoute')
 
-    def load_config(self, config, initialise=False):
+    def load_config(self, config):
         with self._lock:
             try:
                 cfg = config[self._device]
@@ -51,20 +52,18 @@ class APInterface(NetworkInterface):
                 for parameter in parameters:
                     if parameter not in cfg:
                         raise Exception(f"Configuration missing parameters: {parameter}")
-                self._connection_type.from_string(cfg["connection_type"])
+                self._connection_type = self.ConnectionType.from_string(cfg["connection_type"])
                 self._ip = cfg["ip"]
                 self._mask = cfg["mask"]
                 self._route = cfg["route"]
                 self._ssid = cfg["ssid"]
                 self._passphrase = cfg["passphrase"]
-                logger.info(f"Read parameters for {self._device}: {self._connection_type} | IP {self._ip} | Mask {self._mask} | Route {self._route} | SSID {self._ssid}")
+                logger.info(f"Update parameters for {self._device}: {self._connection_type} | IP {self._ip} | Mask {self._mask} | Route {self._route} | SSID {self._ssid}")
             except Exception as e:
-                if initialise:
-                    logger.warning(f"No configuration for {self._device} found ({e}), use defaults")
-                else:
-                    logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
-                    raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
-
+                logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
+                raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
+            self.reload()
+                
     def get_config(self):
         with self._lock:
             conf = {
@@ -164,7 +163,7 @@ class APInterface(NetworkInterface):
             if connection.device == self._device:
                 logger.warning(f'Delete connection {self._device}: {connection.name}')
                 try:
-                    self._adapter.connection_down(name=connection.name)
+                    self._adapter.connection_down(name=connection.name, wait=self.WAIT_FOR_CONNECTION_UP_S)
                 except Exception as e:
                     logger.error(f'Error deactivating AP {self._device}: {e}')
                 try:
@@ -173,6 +172,7 @@ class APInterface(NetworkInterface):
                     logger.error(f'Error deleting AP {self._device}: {e}')
 
     def reload(self):
+        logging.info(f"Reload {self._device}...")
         with self._lock:
             self._update_pending = True
             try:

@@ -1,8 +1,12 @@
+import logging
 import re
 import subprocess
 import nmcli
 from ifconfigparser import IfconfigParser
 from .host_adapter import HostController
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class NMCliAdapter:
@@ -28,6 +32,7 @@ class NMCliAdapter:
         prefix = ''
         if self._use_sudo:
             prefix = 'sudo '
+        logger.info(f"Run command {prefix}{command}")
         if self._remote_host:
             self._host.run_host_command(f'{prefix}{command}')
         else:
@@ -43,7 +48,9 @@ class NMCliAdapter:
         device_type can be 'wifi' or 'ethernet'
         device is the network adapter name (eg. wlan0, eth0, etc.)
         """
-        return nmcli.device()
+        device = nmcli.device()
+        logger.info(f"nmcli.device: {device}")
+        return device
 
     @staticmethod
     def connection():
@@ -53,12 +60,18 @@ class NMCliAdapter:
         :return:
         A list of 'connection' items that should have properties: 'name';
         """
-        return nmcli.connection()
+        connection = nmcli.connection()
+        logger.info(f"nmcli.connection: {connection}")
+        return connection
 
-    def connection_add(self, conn_type, options, ifname, autoconnect):
+    def connection_add(self, conn_type, options, ifname, autoconnect, ssid=None):
+        logger.info(f"nmcli.connection.add conn_type={conn_type}, options={options}, ifname={ifname}, autoconnect={autoconnect}, ssid={ssid}")
         if self._dry_run:
             return
-        return nmcli.connection.add(conn_type=conn_type, options=options, ifname=ifname, autoconnect=autoconnect)
+        if ssid is not None:
+            return nmcli.connection.add(conn_type=conn_type, options=options, ifname=ifname, autoconnect=autoconnect)
+        else:
+            return nmcli.connection.add(conn_type=conn_type, options=options, ifname=ifname, autoconnect=autoconnect, ssid=ssid)
 
     @staticmethod
     def device_wifi(ifname):
@@ -75,41 +88,62 @@ class NMCliAdapter:
         return nmcli.device.status()
 
     def connection_modify(self, name, options):
+        logger.info(f"nmcli.connection.modify name={name}, options={options}")
         if self._dry_run:
             return
         return nmcli.connection.modify(name=name, options=options)
 
-    def connection_down(self, name):
+    def connection_down(self, name, wait, ignore_error=False):
+        logger.info(f"nmcli.connection.down name={name} wait={wait}")
         if self._dry_run:
             return
-        return nmcli.connection.down(name=name)
+        try:
+            return nmcli.connection.down(name=name, wait=wait)
+        except Exception as e:
+            if ignore_error:
+                logger.warning(f"Ignored error: {e}")
+                return None
+            else:
+                raise e
 
-    def connection_up(self, name):
+    def connection_up(self, name, wait):
+        logger.info(f"nmcli.connection.up name={name} wait={wait}")
         if self._dry_run:
             return
-        return nmcli.connection.up(name=name)
+        return nmcli.connection.up(name=name, wait=wait)
 
-    def radio_wifi_off(self):
+    def connection_show(self, name):
+        logger.info(f"nmcli.connection.show name={name}")
         if self._dry_run:
             return
-        return nmcli.radio.wifi_off()
+        return nmcli.connection.show(name=name)
 
-    def radio_wifi_on(self):
-        if self._dry_run:
-            return
-        return nmcli.radio.wifi_on()
+    # def radio_wifi_off(self):
+    #     logger.info(f"nmcli.radio.wifi_off")
+    #     if self._dry_run:
+    #         return
+    #     return nmcli.radio.wifi_off()
+    #
+    # def radio_wifi_on(self):
+    #     logger.info(f"nmcli.radio.wifi_on")
+    #     if self._dry_run:
+    #         return
+    #     return nmcli.radio.wifi_on()
 
     def device_wifi_connect(self, ssid, password):
+        logger.info(f"nmcli.device.wifi_connect ssid={ssid}, password={password}")
         if self._dry_run:
             return
         return nmcli.device.wifi_connect(ssid=ssid, password=password)
 
     def connection_delete(self, name):
+        logger.info(f"nmcli.connection.delete name={name}")
         if self._dry_run:
             return
-        return nmcli.connection.delete()
+        return nmcli.connection.delete(name=name)
 
     def device_wifi_hotspot(self, con_name, ifname, ssid, password):
+        logger.info(f"nmcli.device.wifi_hotspot con_name={con_name}, ifname={ifname}, ssid={ssid}, password={password}")
         if self._dry_run:
             return
         nmcli.device.wifi_hotspot(con_name=con_name, ifname=ifname, ssid=ssid, password=password)
@@ -138,6 +172,11 @@ class NMCliAdapter:
         if self._dry_run:
             return
         self.run_command(f'ip link set {device} up')
+
+    def ip_link_set_down(self, device):
+        if self._dry_run:
+            return
+        self.run_command(f'ip link set {device} down')
 
     def enable_ip_forward(self, enable_ip_forward):
         if self._dry_run:

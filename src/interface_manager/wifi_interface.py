@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 class WiFiInterface(NetworkInterface):
+    WAIT_FOR_CONNECTION_UP_S = 5
+
     class ConnectionType(str, Enum):
         CONNECTION_TYPE_DISABLED = "disabled"
         CONNECTION_TYPE_STATION = "station"
@@ -26,6 +28,7 @@ class WiFiInterface(NetworkInterface):
 
     def __init__(self, device, adapter: NMCliAdapter, def_config):
         super().__init__(device, adapter, def_config)
+        self._hotspot_connection = f'hotspot-{self._device}'
         self._connection_type = self.ConnectionType.CONNECTION_TYPE_DISABLED
         self._ssid = ""
         self._passphrase = ""
@@ -40,7 +43,7 @@ class WiFiInterface(NetworkInterface):
         self._ssid = self._def_config.get('WiFi', 'DefaultWiFiSSID')
         self._passphrase = self._def_config.get('WiFi', 'DefaultWiFiPassphrase')
 
-    def load_config(self, config, initialise=False):
+    def load_config(self, config):
         with self._lock:
             try:
                 print(config)
@@ -49,7 +52,7 @@ class WiFiInterface(NetworkInterface):
                 for parameter in parameters:
                     if parameter not in cfg:
                         raise Exception(f"Configuration missing parameters: {parameter}")
-                self._connection_type.from_string(cfg["connection_type"])
+                self._connection_type = self.ConnectionType.from_string(cfg["connection_type"])
                 self._ip = cfg["ip"]
                 self._mask = cfg["mask"]
                 self._route = cfg["route"]
@@ -57,11 +60,9 @@ class WiFiInterface(NetworkInterface):
                 self._passphrase = cfg["passphrase"]
                 logger.info(f"Read parameters for {self._device}: {self._connection_type} | IP {self._ip} | Mask {self._mask} | Route {self._route} | SSID {self._ssid}")
             except Exception as e:
-                if initialise:
-                    logger.warning(f"No configuration for {self._device} found ({e}), use defaults")
-                else:
-                    logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
-                    raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
+                logger.warning(f"Failed to apply configuration {config} for {self._device}: ({e})")
+                raise Exception(f"Failed to apply configuration {config} for {self._device}: ({e})")
+            self.reload()
 
     def get_config(self):
         with self._lock:
@@ -79,7 +80,35 @@ class WiFiInterface(NetworkInterface):
             return conf
 
     def initialise(self):
-        pass
+        connections = self._adapter.connection()
+        hotspot_found = False
+        enabled = False
+        for connection in connections:
+            if connection.name == self._hotspot_connection:
+                hotspot_found = True
+                status = self._adapter.connection_show(name=connection.name)
+                logger.info(f"Found connection {connection.name}, status autoconnect {status['connection.autoconnect']}")
+                if status['connection.autoconnect'] == 'yes':
+                    enabled = True
+                    self._connection_type = self.ConnectionType.CONNECTION_TYPE_AP
+            elif connection.device == self._device:
+                status = self._adapter.connection_show(name=connection.name)
+                logger.info(f"Found connection {connection.name}, status autoconnect {status['connection.autoconnect']}")
+                if status['connection.autoconnect'] == 'yes':
+                    enabled = True
+                    self._connection_type = self.ConnectionType.CONNECTION_TYPE_STATION
+
+        if not enabled:
+            if hotspot_found:
+                self._connection_type = self.ConnectionType.CONNECTION_TYPE_DISABLED
+            else:
+                self._connection_type = self.ConnectionType.CONNECTION_TYPE_AP
+
+        if not hotspot_found:
+            logger.info(f"{self._device} Hotspot connection {self._hotspot_connection} not found, create")
+            self._adapter.connection_add(conn_type='wifi', options={'con-name': self._hotspot_connection}, ifname=self._device, autoconnect=False, ssid=self._ssid)
+
+        self.refresh()
 
     @property
     def connection_type(self):
@@ -130,40 +159,43 @@ class WiFiInterface(NetworkInterface):
         return list(wifi_list)
 
     def _reset_wifi(self, leave_active_name=''):
-        # self._adapter.stop_dnsmasq()
-        # self._adapter.stop_hostapd()
-        connections = self._adapter.connection()
-        for connection in connections:
-            if connection.device == self._device:
-                if leave_active_name and leave_active_name == connection.name:
-                    logger.info(f'Skip deleting connection {self._device} {connection.name}')
-                else:
-                    logger.warning(f'Delete connection {self._device} {connection.name}')
-                    try:
-                        self._adapter.connection_down(name=connection.name)
-                    except Exception as e:
-                        logger.error(f'Error deactivating Wi-Fi {self._device}: {e}')
-                    try:
-                        self._adapter.connection_delete(connection.name)
-                    except Exception as e:
-                        logger.error(f'Error deleting Wi-Fi {self._device}: {e}')
-        self._scan()
+        return
+        # # self._adapter.stop_dnsmasq()
+        # # self._adapter.stop_hostapd()
+        # connections = self._adapter.connection()
+        # for connection in connections:
+        #     if connection.device == self._device:
+        #         if leave_active_name and leave_active_name == connection.name:
+        #             logger.info(f'Skip deleting connection {self._device} {connection.name}')
+        #         else:
+        #             logger.warning(f'Delete connection {self._device} {connection.name}')
+        #             self._adapter.connection_down(name=connection.name, wait=self.WAIT_FOR_CONNECTION_UP_S, ignore_error=True)
+        #             try:
+        #                 self._adapter.connection_delete(connection.name)
+        #             except Exception as e:
+        #                 logger.error(f'Error deleting Wi-Fi {self._device}: {e}')
+        # self._scan()
 
     def reload(self):
-        with self._lock():
+        with self._lock:
+            logging.info(f"Reload {self._device}...")
             try:
                 self._update_pending = True
                 if self._connection_type == self.ConnectionType.CONNECTION_TYPE_DISABLED:
                     self._status_message('Disabling...')
+                    self._adapter.connection_modify(name=self._hotspot_connection, options={'connection.autoconnect': 'no'})
+                    self._adapter.connection_down(name=self._hotspot_connection, wait=self.WAIT_FOR_CONNECTION_UP_S, ignore_error=True)
                     self._reset_wifi()
                     time.sleep(2)
-                    self._adapter.radio_wifi_off()
+                    self._adapter.ip_link_set_down(self._device)
                     self._update_pending = False
                     self._status_message('Disabled')
                 elif self._connection_type == self.ConnectionType.CONNECTION_TYPE_STATION:
                     if self._ssid and self._passphrase:
+                        self._adapter.connection_modify(name=self._hotspot_connection, options={'connection.autoconnect': 'no'})
+                        self._adapter.connection_down(name=self._hotspot_connection, wait=self.WAIT_FOR_CONNECTION_UP_S, ignore_error=True)
                         self._status_message('Power on...')
-                        self._adapter.radio_wifi_on()
+                        self._adapter.ip_link_set_up(self._device)
                         time.sleep(2)
                         for tries in range(2):
                             try:
@@ -197,10 +229,12 @@ class WiFiInterface(NetworkInterface):
                                 self._status_message(f'Creating access point try {tries}...')
                             else:
                                 self._status_message('Creating access point...')
-                            self._adapter.device_wifi_hotspot(con_name="hotspot", ifname=self._device, ssid=f'{self._ssid}', password=f'{self._passphrase}')
-                            self._adapter.connection_modify(name='hotspot', options={'ipv4.method': 'shared'})
-                            self._adapter.connection_modify(name='hotspot', options={'connection.autoconnect': 'yes'})
-                            self._adapter.connection_modify(name='hotspot', options={'802-11-wireless.mode': 'wpa-psk'})
+                            self._adapter.device_wifi_hotspot(con_name=self._hotspot_connection, ifname=self._device, ssid=f'{self._ssid}', password=f'{self._passphrase}')
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'ipv4.method': 'shared'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'connection.autoconnect': 'yes'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless.mode': 'wpa-psk'})
+                            self._adapter.connection_modify(name=self._hotspot_connection, options={'802-11-wireless-security.pmf': 'disable'})
+                            self._adapter.connection_up(name=self._hotspot_connection, wait=self.WAIT_FOR_CONNECTION_UP_S)
 
                             # Alternative:
                             # nmcli con add type wifi ifname wlan0 con-name Hostspot autoconnect yes ssid Hostspot
@@ -211,6 +245,7 @@ class WiFiInterface(NetworkInterface):
 
                             self._update_pending = False
                             self._status_message(f'{self.status}')
+                            return
                         except Exception as e:
                             self._status_message(f'Hotspot: {e}', error=True)
                 else:
@@ -239,9 +274,8 @@ class WiFiInterface(NetworkInterface):
                 if iface.ipv4_bcast is None:
                     ipv4_bcast = '0.0.0.0'
 
-                self._ssid = self._adapter.iw_dev_link(self._device)
-
                 if self._connection_type == self.ConnectionType.CONNECTION_TYPE_STATION:
+                    self._ssid = self._adapter.iw_dev_link(self._device)
                     self._ip = ipv4_addr
                     self._mask = ipv4_mask
                     self._route = ipv4_bcast

@@ -29,7 +29,6 @@ class InterfaceManager:
         self._use_whitelist = def_config.getboolean('Interfaces', 'InterfaceUseWhitelist')
         self._whitelist = def_config.get('Interfaces', 'InterfaceWhitelist')
         self._use_dedicated_ap = def_config.getboolean('AP', 'UseDedicatedAP')
-        self._conf_file = def_config.get('Global', 'ParametersConfigFile')
         self._dry_run = def_config.getboolean('Global', 'DryRun')
         self._remote_host = def_config.getboolean('RemoteHost', 'EnableRemoteHost')
         self._remote_host_port = def_config.getint('RemoteHost', 'HostSSHPort')
@@ -108,40 +107,18 @@ class InterfaceManager:
             else:
                 self.last_disconnected_time = time.time()
         self.previous_connected_state = connected
-        if time.time() - self.last_disconnected_time > self._enable_ap_after_period_s:
-            if self.interfaces[self.ap_interface_idx].connection_type != APInterface.ConnectionType.CONNECTION_TYPE_AP.value:
-                self.interfaces[self.ap_interface_idx].connection_type = APInterface.ConnectionType.CONNECTION_TYPE_AP.value
-                self.interfaces[self.ap_interface_idx].reload()
+        if not connected:
+            if time.time() - self.last_disconnected_time > self._enable_ap_after_period_s:
+                if self.interfaces[self.ap_interface_idx].connection_type != APInterface.ConnectionType.CONNECTION_TYPE_AP.value:
+                    logger.warning("Detected broken connection, set up hotspot")
+                    self.interfaces[self.ap_interface_idx].connection_type = APInterface.ConnectionType.CONNECTION_TYPE_AP.value
+                    self.interfaces[self.ap_interface_idx].ssid = self.def_config.get('AP', 'DefaultAPSSID')
+                    self.interfaces[self.ap_interface_idx].passphrase = self.def_config.get('AP', 'DefaultAPPassphrase')
+                    self.interfaces[self.ap_interface_idx].reload()
 
     def initialise(self):
-        logger.info(f"Initialising from configuration file {self._conf_file}")
-        filename = Path(self._conf_file)
-        filename.parent.mkdir(parents=True, exist_ok=True)
-        filename.touch(exist_ok=True)
-        if not filename.is_file():
-            raise FileNotFoundError(f"Failed to create file: {filename}")
-        with open(self._conf_file, 'r') as conf:
-            try:
-                self._conf = json.loads(conf.read())
-            except Exception as e:
-                logger.error("Failed to load saved configuration, have to revert to the defaults")
-                self._conf = {}
         for interface in self.interfaces:
-            interface.load_config(self._conf, initialise=True)
             interface.initialise()
-
-    @staticmethod
-    def atomic_write(file_path, data, mode='w'):
-        dir_name = os.path.dirname(file_path)
-        with tempfile.NamedTemporaryFile(mode=mode, dir=dir_name, delete=False) as temp_file:
-            temp_file.write(data)
-            temp_name = temp_file.name
-        os.replace(temp_name, file_path)
-        logger.info(f"Configuration saved to {file_path}")
-
-    def save(self):
-        data = json.dumps(self.get_conf())
-        self.atomic_write(self._conf_file, data)
 
     def periodic_update(self):
         while True:
@@ -155,10 +132,9 @@ class InterfaceManager:
         for interface in self.interfaces:
             interface.reload()
 
-    def load_config(self, config, initialise=False):
+    def load_config(self, config):
         for interface in self.interfaces:
-            interface.load_config(config, initialise=initialise)
-            interface.reload()
+            interface.load_config(config)
 
     def get_conf(self):
         self._conf = {}

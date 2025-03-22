@@ -21,9 +21,6 @@ USE_FULL_BACKTRACE = True
 
 DEFAULT_CONFIG = """
 [Global]
-# Configuration will be saved to this file
-ParametersConfigFile = /etc/network_configurator/net_parameters.json
-
 # Don't execute anything that can change the existing configuration. 
 # The app will still retrieve information about the real interfaces
 DryRun = False
@@ -40,6 +37,7 @@ HostHostname = localhost
 [Server]
 EnableServer = True
 Port = 50000
+Address = 0.0.0.0
 
 [Interfaces]
 EnableAPAfterBeingDisconnectedForSeconds = 30
@@ -55,7 +53,7 @@ InterfaceUseWhitelist = False
 InterfaceWhitelist = []
 
 [AP]
-UseDedicatedAP = True
+UseDedicatedAP = False
 APHideInUI = True
 APInterfaceDevice = uap0
 DefaultAPSSID = ConfigurationTest
@@ -72,14 +70,14 @@ DefaultWiFiConnectionType = station
 DefaultWiFiIP = 0.0.0.0
 DefaultWiFiMask = 255.255.255.0
 DefaultWiFiRoute = 0.0.0.0
-DefaultWiFiSSID = 
-DefaultWiFiPassphrase = 
+DefaultWiFiSSID = ConfigurationTest
+DefaultWiFiPassphrase = 012345678
 
 [Ethernet]
 DefaultEthernetConnectionType = dynamic_ip
-DefaultEthernetIP = 0.0.0.0
+DefaultEthernetIP = 192.168.55.1
 DefaultEthernetMask = 255.255.255.0
-DefaultEthernetRoute = 0.0.0.0
+DefaultEthernetRoute = 192.168.55.1
 
 """
 
@@ -101,6 +99,7 @@ class NetworkConfigurationService:
         self.manager = InterfaceManager(def_config=def_config)
         self._start_server = def_config.getboolean('Server', 'EnableServer')
         self._port = def_config.getint('Server', 'Port')
+        self._address = def_config.get('Server', 'Address')
         self._ap_hide_in_ui = def_config.getboolean('AP', 'APHideInUI')
         self._ap_interface = def_config.get('AP', 'APInterfaceDevice')
         if self._start_server:
@@ -128,10 +127,15 @@ class NetworkConfigurationService:
             if request.method == 'GET':
                 conf = self.manager.get_conf()
                 if self._ap_hide_in_ui:
-                    conf.pop(self._ap_interface)
+                    try:
+                        conf.pop(self._ap_interface)
+                    except:
+                        pass
                 return jsonify(conf), 200
             elif request.method == 'POST':
-                self.manager.load_config(request.get_json())
+                config = request.get_json()
+                logger.info(f"Received config: {config}")
+                self.manager.load_config(config)
                 return jsonify("OK"), 200
 
         @app.route('/api/<interface_id>/config', methods=['GET', 'POST'])
@@ -143,6 +147,7 @@ class NetworkConfigurationService:
                             return jsonify(interface.get_conf()), 200
                         elif request.method == 'POST':
                             config = request.get_json()
+                            logger.info(f"Received config: {config}")
                             interface.load_config({interface_id: config})
                             return jsonify("OK"), 200
                 return jsonify({'error': f'Interface {interface_id} not found. Acceptable interfaces are: {", ".join(self.manager.interfaces)}'}), 404
@@ -181,7 +186,7 @@ class NetworkConfigurationService:
             except Exception as e:
                 return jsonify({'error': f'{e}'}), 500
 
-        app.run(debug=False, port=self._port)
+        app.run(debug=False, port=self._port, host=self._address)
 
     def run(self):
         self.start_server()
