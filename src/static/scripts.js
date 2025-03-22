@@ -1,6 +1,6 @@
 const editingFields = new Set();
 
-async function fetchData(url, method = "GET", body = null) {
+async function fetchData(url, method = "GET", body = null, timeout = 5000) {
   const options = {
     method,
     headers: {
@@ -12,10 +12,17 @@ async function fetchData(url, method = "GET", body = null) {
     options.body = JSON.stringify(body);
   }
 
-  try {
-    const response = await fetch(url, options);
-    const data = await response.json();
+  // Create a timeout promise
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Request timed out")), timeout)
+  );
 
+  try {
+    const response = await Promise.race([
+      fetch(url, options),
+      timeoutPromise
+    ]);
+    const data = await response.json();
     return {
       status: response.ok,
       response: data,
@@ -36,18 +43,24 @@ function wifiScanChanged(intf) {
 }
 
 async function wifiScan(intf) {
-  const scanResult = (await fetchData(`/api/param/${intf}/scan`)).response;
+  // Show the spinner while scanning
   const wifiScanResults = document.getElementById(`scan-list-${intf}`);
+  wifiScanResults.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
+
+  const scanResult = (await fetchData(`/api/param/${intf}/scan`)).response;
+
   wifiScanResults.innerHTML = "";
   const selectElement = document.createElement("select");
   selectElement.id = `wifi-scan-select-${intf}`;
   selectElement.onchange = () => wifiScanChanged(intf);
+
   for (const ssid of scanResult) {
     const optionElement = document.createElement("option");
     optionElement.value = ssid;
     optionElement.textContent = ssid;
     selectElement.appendChild(optionElement);
   }
+
   wifiScanResults.appendChild(selectElement);
 }
 
@@ -70,6 +83,7 @@ async function applyConfig(intf, ifaceType) {
     data.ssid = ssid;
     data.passphrase = passphrase;
   }
+  
   const { status, response } = await fetchData(
     `/api/${intf}/config`,
     "POST",
@@ -98,7 +112,7 @@ async function loadInterfaces(interfaces, config, status) {
           <td colspan="2">
             <h4>Available Networks</h4>
             <div id="scan-list-${intf}">(Press scan to show the list of networks)</div>
-            <button onclick="wifiScan('${intf}')">Scan</button>
+            <div style="display: flex; justify-content: right;"><button onclick="wifiScan('${intf}')">Scan</button></div>
           </td>
         </tr>
         <tr>
@@ -126,7 +140,7 @@ async function loadInterfaces(interfaces, config, status) {
           <tr>
             <td>Connection Type:</td>
             <td>
-              <select id="connection-${intf}" onchange="connection_type_changed('${intf}')">
+              <select id="connection-${intf}" onchange="connectionTypeChanged('${intf}')">
                 ${connectionOptions}
               </select>
             </td>
@@ -145,7 +159,7 @@ async function loadInterfaces(interfaces, config, status) {
             <td><input class="ip" id="router-${intf}" type="text" minlength="7" maxlength="15" size="15" pattern="${ipPattern}" value="0.0.0.0" /></td>
           </tr>
           <tr>
-            <td colspan="2">
+            <td colspan="2" style="text-align: right; width: 100%;">
               <button onclick="applyConfig('${intf}', '${ifaceType}')">Apply</button>
             </td>
           </tr>
@@ -154,7 +168,6 @@ async function loadInterfaces(interfaces, config, status) {
     `;
   }
 }
-
 
 async function refresh(interfaces, config, status) {
   const container = document.getElementById("interfaces-container");
@@ -221,6 +234,25 @@ async function refresh(interfaces, config, status) {
         passphrase.value = `${ifaceConfig.passphrase || ""}`;
       }
     }
+
+    connectionTypeChanged(intf);
+  }
+}
+
+function connectionTypeChanged(intf) {
+  const connectionType = document.getElementById(`connection-${intf}`).value;
+  const ip = document.getElementById(`ip-${intf}`);
+  const mask = document.getElementById(`mask-${intf}`);
+  const router = document.getElementById(`router-${intf}`);
+
+  if (connectionType === "dynamic_ip" || connectionType === "station" || connectionType === "disabled") {
+    ip.disabled = true;
+    mask.disabled = true;
+    router.disabled = true;
+  } else {
+    ip.disabled = false;
+    mask.disabled = false;
+    router.disabled = false;
   }
 }
 

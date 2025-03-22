@@ -74,7 +74,7 @@ class WiFiInterface(NetworkInterface):
                     "mask": self._mask,
                     "route": self._route,
                     "ssid": self._ssid,
-                    "passphrase": self._passphrase
+                    "passphrase": self._passphrase if self._connection_type == self.ConnectionType.CONNECTION_TYPE_AP else ""
                 }
             }
             return conf
@@ -141,7 +141,10 @@ class WiFiInterface(NetworkInterface):
     @property
     def passphrase(self):
         with self._lock:
-            return self._passphrase
+            if self._connection_type == self.ConnectionType.CONNECTION_TYPE_AP:
+                return self._passphrase
+            else:
+                return ""
 
     @passphrase.setter
     def passphrase(self, value):
