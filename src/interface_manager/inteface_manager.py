@@ -25,7 +25,7 @@ class InterfaceManager:
         self._enable_ap_after_period_s = def_config.getint('Interfaces', 'EnableAPAfterBeingDisconnectedForSeconds')
         self._ap_always_on = def_config.getboolean('Interfaces', 'AccessPointAlwaysOn')
         self._update_period_s = def_config.getfloat('Interfaces', 'UpdatePeriodSec')
-        self._check_ethernet_for_connection = def_config.getfloat('Interfaces', 'CheckEthernetForConnection')
+        self._check_ethernet_for_connection = def_config.get('Interfaces', 'CheckEthernetForConnection')
         self._use_sudo = def_config.getboolean('Interfaces', 'UseSudo')
         self._use_whitelist = def_config.getboolean('Interfaces', 'InterfaceUseWhitelist')
         self._whitelist = def_config.get('Interfaces', 'InterfaceWhitelist')
