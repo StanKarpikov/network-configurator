@@ -38,6 +38,7 @@ HostHostname = localhost
 EnableServer = True
 Port = 50000
 Address = 0.0.0.0
+ReverseProxyPath = /net
 
 [Interfaces]
 EnableAPAfterBeingDisconnectedForSeconds = 30
@@ -94,6 +95,29 @@ Default configuration file:
 
 root_dir = Path(".")
 
+class ReverseProxied(object):
+
+    def __init__(self, app, script_name=None, scheme=None, server=None):
+        self.app = app
+        self.script_name = script_name
+        self.scheme = scheme
+        self.server = server
+
+    def __call__(self, environ, start_response):
+        script_name = environ.get('HTTP_X_SCRIPT_NAME', '') or self.script_name
+        if script_name:
+            environ['SCRIPT_NAME'] = script_name
+            path_info = environ['PATH_INFO']
+            if path_info.startswith(script_name):
+                environ['PATH_INFO'] = path_info[len(script_name):]
+        scheme = environ.get('HTTP_X_SCHEME', '') or self.scheme
+        if scheme:
+            environ['wsgi.url_scheme'] = scheme
+        server = environ.get('HTTP_X_FORWARDED_SERVER', '') or self.server
+        if server:
+            environ['HTTP_HOST'] = server
+        return self.app(environ, start_response)
+
 
 class NetworkConfigurationService:
     def __init__(self, def_config):
@@ -103,6 +127,7 @@ class NetworkConfigurationService:
         self._address = def_config.get('Server', 'Address')
         self._ap_hide_in_ui = def_config.getboolean('AP', 'APHideInUI')
         self._ap_interface = def_config.get('AP', 'APInterfaceDevice')
+        self._reverse_proxy_path = def_config.get('Server', 'ReverseProxyPath')
         if self._start_server:
             self.start_server()
         else:
@@ -114,6 +139,7 @@ class NetworkConfigurationService:
         app = Flask(__name__,
                     static_folder=root_dir / 'static',
                     template_folder=root_dir / 'templates')
+        app.wsgi_app = ReverseProxied(app.wsgi_app, script_name=self._reverse_proxy_path)
 
         @app.route('/')
         def index():

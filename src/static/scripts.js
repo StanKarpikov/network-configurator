@@ -47,7 +47,7 @@ async function wifiScan(intf) {
   const wifiScanResults = document.getElementById(`scan-list-${intf}`);
   wifiScanResults.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
 
-  const scanResult = (await fetchData(`/api/param/${intf}/scan`)).response;
+  const scanResult = (await fetchData(`api/param/${intf}/scan`, 15000)).response;
 
   wifiScanResults.innerHTML = "";
   const selectElement = document.createElement("select");
@@ -85,7 +85,7 @@ async function applyConfig(intf, ifaceType) {
   }
   
   const { status, response } = await fetchData(
-    `/api/${intf}/config`,
+    `api/${intf}/config`,
     "POST",
     data
   );
@@ -259,7 +259,7 @@ function connectionTypeChanged(intf) {
 async function connectToWifi(ssid) {
   const password = prompt(`Enter password for ${ssid}`);
   if (password !== null) {
-    await fetch(`/api/param/wifi/connect`, {
+    await fetch(`api/param/wifi/connect`, {
       method: "POST",
       body: JSON.stringify({ ssid, password }),
     });
@@ -270,7 +270,7 @@ async function connectToWifi(ssid) {
 async function connectToWifiManual(intf) {
   const ssid = document.getElementById(`ssid-${intf}`).value;
   const password = document.getElementById(`password-${intf}`).value;
-  await fetch(`/api/param/${intf}/wifi/connect`, {
+  await fetch(`api/param/${intf}/wifi/connect`, {
     method: "POST",
     body: JSON.stringify({ ssid, password }),
   });
@@ -280,9 +280,9 @@ async function connectToWifiManual(intf) {
 var connected = false;
 
 async function periodicRefresh() {
-  const interfaces = (await fetchData("/api/interfaces")).response;
-  const config = (await fetchData("/api/config")).response;
-  const status = (await fetchData("/api/status")).response;
+  const interfaces = (await fetchData("api/interfaces")).response;
+  const config = (await fetchData("api/config")).response;
+  const status = (await fetchData("api/status")).response;
 
   if (!connected) {
     if (interfaces && config && status) {
