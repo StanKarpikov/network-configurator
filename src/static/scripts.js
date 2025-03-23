@@ -47,7 +47,7 @@ async function wifiScan(intf) {
   const wifiScanResults = document.getElementById(`scan-list-${intf}`);
   wifiScanResults.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
 
-  const scanResult = (await fetchData(`api/param/${intf}/scan`, 15000)).response;
+  const scanResult = (await fetchData(`api/param/${intf}/scan`, "GET", null, 30000)).response;
 
   wifiScanResults.innerHTML = "";
   const selectElement = document.createElement("select");
