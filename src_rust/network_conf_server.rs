@@ -1,38 +1,42 @@
-use std::any::Any;
 use actix_files::{NamedFile, Files};
-use actix_web::{web, App, HttpServer, HttpRequest, Responder, HttpResponse, Error, Result};
-use std::sync::{Arc, Mutex};
-use config::{Config, File, FileFormat, ConfigError};
-use log::{info, error};
+use actix_web::{get, App, HttpServer, Responder, HttpResponse};
+use config::{Config, FileFormat, ConfigError};
+use log::info;
 use clap::{Command, Arg};
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 use tokio::signal;
+use thiserror::Error;
 
 mod interface_manager;
 use interface_manager::InterfaceManager;
 
 const DEFAULT_CONFIG: &str = "network-configuration.default.conf";
 
-struct NetworkConfigurationService {
+struct WEBParameters {
     start_server: bool,
-    port: i16,
+    port: u16,
     address: String,
     ap_hide_in_ui: bool,
     ap_interface: String,
     reverse_proxy_path: String,
-    manager: InterfaceManager,
 }
 
-impl NetworkConfigurationService {
+#[derive(Error, Debug)]
+pub enum ParametersInitError {
+    #[error("Configuration error: {0}")]
+    Config(#[from] ConfigError),
+    #[error("Unknown parameters initialisation error")]
+    Unknown,
+}
 
-    fn new(def_config: &Config)-> Result<Self, ConfigError> {
+impl WEBParameters {
+    fn new(def_config: &Config)-> Result<Self, ParametersInitError> {
         let start_server: bool = def_config.get("Server.EnableServer")?;
-        let port: i16 = def_config.get("Server.Port")?;
+        let port: u16 = def_config.get("Server.Port")?;
         let address: String = def_config.get("Server.Address")?;
         let ap_hide_in_ui: bool = def_config.get("AP.APHideInUI")?;
         let ap_interface: String = def_config.get("AP.APInterfaceDevice")?;
         let reverse_proxy_path: String = def_config.get("Server.ReverseProxyPath")?;
-        let manager = InterfaceManager::new(def_config)?;
         Ok(Self {
             start_server,
             port,
@@ -40,61 +44,59 @@ impl NetworkConfigurationService {
             ap_hide_in_ui,
             ap_interface,
             reverse_proxy_path,
-            manager,
         })
     }
+}
 
-    async fn index(&self, req: HttpRequest) -> Result<NamedFile> {
-        if let Some(filename) = req.match_info().get("filename") {
-            let path: PathBuf = Path::new("static").join(filename);
-            // Handle the possibility of file not being found or other errors
-            NamedFile::open(path).map_err(|e| {
-                actix_web::error::ErrorInternalServerError(format!("File not found: {}", e))
-            })
-        } else {
-            Err(actix_web::error::ErrorBadRequest("Filename parameter is missing"))
-        }
-    }
+#[get("/")]
+async fn index() -> impl Responder {
+    let path: PathBuf = Path::new("static").join("index.html");
+    NamedFile::open(path).map_err(|e| {
+        actix_web::error::ErrorInternalServerError(format!("File not found: {}", e))
+    })
+}
 
-    async fn get_status(&self) -> impl Responder {
-        // return jsonify(self.manager.get_status())
-        HttpResponse::Ok()
-    }
+async fn get_status() -> impl Responder {
+    // return jsonify(self.manager.get_status())
+    HttpResponse::Ok()
+}
 
-    async fn get_config(&self) -> impl Responder {
-        let config = self.manager.get_conf()?;
-        HttpResponse::Ok().json(&config);
-    }
+// async fn get_config(&self) -> impl Responder {
+//     let config = self.manager.get_conf()?;
+//     HttpResponse::Ok().json(&config);
+// }
 
-    async fn post_config(&self, config: web::Json<serde_json::Value>) -> impl Responder {
-        self.manager.load_config(config).await;
-        HttpResponse::Ok();
-    }
+// async fn post_config(&self, config: web::Json<serde_json::Value>) -> impl Responder {
+//     self.manager.load_config(config).await;
+//     HttpResponse::Ok();
+// }
 
-    async fn run(&self) -> std::io::Result<()> {
-        if self.start_server {
-            let server_string = format!("{}{}", self.address, self.port);
-            info!(format!("Starting server on http://{server_string}"));
+#[allow(unused_variables)]
+async fn run(parameters:&WEBParameters, manager: &InterfaceManager) -> std::io::Result<()> {
+    if parameters.start_server {
+        let server_string = format!("{}{}", parameters.address, parameters.port);
+        // info!(format!("Starting server on http://{}", server_string));
 
-            HttpServer::new(move || {
-                App::new()
-                    .service(Files::new("/static", "static").prefer_utf8(true))
-                    .route("/", web::get().to(NetworkConfigurationService::index))
-                    .route("/api/status", web::get().to(NetworkConfigurationService::get_status))
-                    .route("/api/config", web::get().to(NetworkConfigurationService::get_config))
-                    .route("/api/config", web::post().to(NetworkConfigurationService::post_config))
-                // .route("/api/interfaces", web::get().to(get_interfaces))
-                // .route("/api/{interface_id}/config", web::get().to(interface_config))
-            })
-                .bind(server_string)?
-                .run()
-                .await
-        }else{
-            info!("Waiting indefinitely...");
-            signal::ctrl_c().await?;
-            info!("Received Ctrl+C, exiting...");
-            Ok(())
-        }
+        HttpServer::new(move || {
+            // let service_clone = Arc::clone(&service);
+            App::new()
+                // .app_data(manager.clone())
+                .service(Files::new("/static", "static").prefer_utf8(true))
+                .service(index)
+                // .route("/api/status", web::get().to(NetworkConfigurationService::get_status))
+                // .route("/api/config", web::get().to(NetworkConfigurationService::get_config))
+                // .route("/api/config", web::post().to(NetworkConfigurationService::post_config))
+            // .route("/api/interfaces", web::get().to(get_interfaces))
+            // .route("/api/{interface_id}/config", web::get().to(interface_config))
+        })
+            .bind(server_string)?
+            .run()
+            .await
+    }else{
+        info!("Waiting indefinitely...");
+        signal::ctrl_c().await?;
+        info!("Received Ctrl+C, exiting...");
+        Ok(())
     }
 }
 
@@ -125,7 +127,9 @@ async fn main() -> std::io::Result<()> {
         .build()
         .expect("Failed to read configuration.");
 
-    Arc::new(NetworkConfigurationService::new(&def_config).unwrap().run().await);
+    let web_parameters = WEBParameters::new(&def_config).expect("Failed to load configuration");
+    let manager = InterfaceManager::new(&def_config)?;
+    run(&web_parameters, &manager).await?;
 
     Ok(())
 }

@@ -1,13 +1,13 @@
 use std::io::Error;
-use actix_web::dev::Service;
 use actix_web::web::Json;
-use config::{Config, ConfigError};
+use config::Config;
 use log::{info, warn};
+use serde_merge::{mmerge, Map};
 use serde_json::Value;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 pub struct Interface {
-
+    
 }
 
 pub struct Device{
@@ -27,10 +27,14 @@ impl NMCliAdapter {
 
 impl Interface {
 
+    pub fn get_conf(&self) -> Result<Map, Error> {
+        let config = Map::new();
+        Ok(config)
+    }
 }
 
 pub struct InterfaceManager {
-    mut interfaces:Vec<Interface>,
+    interfaces:Vec<Interface>,
     last_disconnected_time:SystemTime,
     enable_ap_after_period_s:f32,
     ap_always_on:bool,
@@ -47,31 +51,31 @@ pub struct InterfaceManager {
     remote_host_hostname:String,
     ap_interface_idx:usize,
     previous_connected_state:bool,
-    def_config:&'static Config,
+    def_config:Config,
     adapter:NMCliAdapter,
 }
 
 impl InterfaceManager {
 
-    pub fn new(def_config: &'static Config)-> Result<Self, Error> {
+    pub fn new(def_config: &Config)-> Result<Self, Error> {
         let interfaces = Vec::new();
         let last_disconnected_time = SystemTime::now();
-        let enable_ap_after_period_s = def_config.get("Interfaces.EnableAPAfterBeingDisconnectedForSeconds")?;
-        let ap_always_on = def_config.get("Interfaces.AccessPointAlwaysOn")?;
-        let update_period_s = def_config.get("Interfaces.UpdatePeriodSec")?;
-        let check_ethernet_for_connection = def_config.get("Interfaces.CheckEthernetForConnection")?;
-        let use_sudo = def_config.get("Interfaces.UseSudo")?;
-        let use_whitelist = def_config.get("Interfaces.InterfaceUseWhitelist")?;
-        let whitelist = def_config.get("Interfaces.InterfaceWhitelist")?;
-        let use_dedicated_ap = def_config.get("AP.UseDedicatedAP")?;
-        let dry_run = def_config.get("Global.DryRun")?;
-        let remote_host = def_config.get("RemoteHost.EnableRemoteHost")?;
-        let remote_host_port = def_config.get("RemoteHost.HostSSHPort")?;
-        let remote_host_ssh_key = def_config.get("RemoteHost.HostSSHKeyFile")?;
-        let remote_host_hostname = def_config.get("RemoteHost.HostHostname")?;
+        let enable_ap_after_period_s = def_config.get("Interfaces.EnableAPAfterBeingDisconnectedForSeconds").unwrap();
+        let ap_always_on = def_config.get("Interfaces.AccessPointAlwaysOn").unwrap();
+        let update_period_s = def_config.get("Interfaces.UpdatePeriodSec").unwrap();
+        let check_ethernet_for_connection = def_config.get("Interfaces.CheckEthernetForConnection").unwrap();
+        let use_sudo = def_config.get("Interfaces.UseSudo").unwrap();
+        let use_whitelist = def_config.get("Interfaces.InterfaceUseWhitelist").unwrap();
+        let whitelist = def_config.get("Interfaces.InterfaceWhitelist").unwrap();
+        let use_dedicated_ap = def_config.get("AP.UseDedicatedAP").unwrap();
+        let dry_run = def_config.get("Global.DryRun").unwrap();
+        let remote_host = def_config.get("RemoteHost.EnableRemoteHost").unwrap();
+        let remote_host_port = def_config.get("RemoteHost.HostSSHPort").unwrap();
+        let remote_host_ssh_key = def_config.get("RemoteHost.HostSSHKeyFile").unwrap();
+        let remote_host_hostname = def_config.get("RemoteHost.HostHostname").unwrap();
         let ap_interface_idx = 0;
         let previous_connected_state = true;
-        let def_config = def_config;
+        let def_config = def_config.clone();
         // let adapter =NMCliAdapter().new(use_sudo:use_sudo,
         //                                 dry_run:dry_run,
         //                                 remote_host:remote_host,
@@ -104,7 +108,7 @@ impl InterfaceManager {
     }
 
     fn detect_interfaces(&mut self) -> Result<(), Error> {
-        info!("Detecting interfaces...")?;
+        info!("Detecting interfaces...");
 
         let devices = self.adapter.device();
         let mut ap_found = false;
@@ -144,17 +148,17 @@ impl InterfaceManager {
         // Ensure that a dedicated AP interface is created, if needed
         if self.use_dedicated_ap {
             if !ap_found {
-                info!("AP interface not found, first run? Creating the interface...")?;
+                info!("AP interface not found, first run? Creating the interface...");
                 // let interface = APInterface::new("", &self.adapter, &self.def_config);
                 self.ap_interface_idx = Some(self.interfaces.len()).unwrap();
                 // self.interfaces.push(interface);
             } else {
-                info!("Dedicated AP interface found, {} will be used as AP", self.interfaces[self.ap_interface_idx.unwrap()].device);
+                // info!("Dedicated AP interface found, {} will be used as AP", self.interfaces[self.ap_interface_idx].device);
             }
         } else {
-            // Select the first WiFi interface to use as an AP
+            // Select the first Wi-Fi interface to use as an AP
             for (idx, interface) in self.interfaces.iter().enumerate() {
-                // if let InterfaceType::Wifi = interface.interface_type {
+                // if let InterfaceType::WiFi = interface.interface_type {
                 //     self.ap_interface_idx = Some(idx);
                 //     info!("Dedicated AP not used, {} will be used as AP", interface.device);
                 //     break;
@@ -181,19 +185,20 @@ impl InterfaceManager {
         Ok({})
     }
 
+    #[allow(unused_variables)]
     pub fn load_config(&self, x: Json<Value>) -> Result<(), Error> {
         Ok({})
     }
 
-    pub fn get_conf(&self) -> Result<Json<Value>, Error> {
-        let mut config = serde_json::Map::new();
+    pub fn get_conf(&self) -> Result<Map, Error> {
+        let mut global_config = Map::new();
 
         for interface in self.interfaces.iter() {
-            let config = interface.get_config();
-            config.merge(&config);
+            let config = interface.get_conf()?;
+            global_config = mmerge(&global_config, &config).unwrap();
         }
 
-        Ok({config})
+        Ok(global_config)
     }
 
     pub fn get_status(&self) -> Result<(), Error> {
