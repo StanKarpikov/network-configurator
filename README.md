@@ -2,6 +2,12 @@
 
 `Network-Configurator` is a minimal captive portal implementation that can be used to configure network settings (Wi-Fi and Ethernet) on IoT devices, primarly targeted Raspberry Pi Linux with NetworkManager. However, it can be easily adapted to other platforms by replacing the adapter component.
 
+**TODO:**
+
+- Python project is done
+- Rust and Go implementation is **work in progress**
+
+
 See `network-configuration.default.conf` for details about the configuration options.
 
 `src_python` contains Python source code.
