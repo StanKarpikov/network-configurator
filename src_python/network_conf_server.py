@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import logging
 import time
@@ -6,6 +7,9 @@ from pathlib import Path
 from flask import request
 from configparser import ConfigParser
 from flask import Flask, render_template, jsonify
+
+# Add current folder to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from interface_manager.inteface_manager import InterfaceManager
 
@@ -54,6 +58,7 @@ class ReverseProxied(object):
 class NetworkConfigurationService:
     def __init__(self, def_config):
         self.manager = InterfaceManager(def_config=def_config)
+        self._static_folder = def_config.get('Server', 'StaticFolder')
         self._start_server = def_config.getboolean('Server', 'EnableServer')
         self._port = def_config.getint('Server', 'Port')
         self._address = def_config.get('Server', 'Address')
@@ -69,7 +74,7 @@ class NetworkConfigurationService:
 
     def start_server(self):
         app = Flask(__name__,
-                    static_folder=root_dir / 'static')
+                    static_folder= self._static_folder)
         app.wsgi_app = ReverseProxied(app.wsgi_app, script_name=self._reverse_proxy_path)
 
         @app.route('/')
@@ -159,10 +164,13 @@ def main():
     try:
         def_config = ConfigParser()
         def_config.read(DEFAULT_CONFIG)
-        if os.path.isfile(args.conf):
-            def_config.read(args.conf)
-        else:
-            logger.warning("Configuration file not provided, using default configuration")
+        try:
+            if args.conf is not None and os.path.isfile(args.conf):
+                def_config.read(args.conf)
+            else:
+                logger.warning("Configuration file not provided, using default configuration")
+        except:
+            logger.warning("Error in the configuration file, using default configuration")
 
         NetworkConfigurationService(def_config)
     except Exception as e:

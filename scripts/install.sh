@@ -18,7 +18,10 @@ TARGET_DIR="$RELEASE_DIR/network-configurator"
 
 mkdir -p "$TARGET_DIR"
 
-# Copy all Python files from source to the target directory
-find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.py" -exec cp {} "$TARGET_DIR" \;
+rsync -avm --include='*.py' --exclude='*' "$SOURCE_DIR/" "$TARGET_DIR/"
+
+cp "$SOURCE_DIR/../network-configuration.default.conf" "$TARGET_DIR/"
+
+cp -r "$SOURCE_DIR/../static" "$TARGET_DIR/"
 
 echo "Copied all Python files from $SOURCE_DIR to $TARGET_DIR"
