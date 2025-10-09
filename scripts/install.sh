@@ -3,13 +3,29 @@
 # Exit on errors
 set -e
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <source_folder> <release_folder>"
+# Parse named parameters
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --src-python=*)
+            SOURCE_DIR="${1#*=}"
+            shift
+            ;;
+        --destination-folder=*)
+            RELEASE_DIR="${1#*=}"
+            shift
+            ;;
+        *)
+            echo "Unknown parameter: $1"
+            echo "Usage: $0 --src-python=PATH --destination-folder=PATH"
+            exit 1
+            ;;
+    esac
+done
+
+if [ -z "$SOURCE_DIR" ] || [ -z "$RELEASE_DIR" ]; then
+    echo "Usage: $0 --src-python=PATH --destination-folder=PATH"
     exit 1
 fi
-
-SOURCE_DIR="$1"
-RELEASE_DIR="$2"
 
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 RELEASE_DIR="$(cd "$RELEASE_DIR" && pwd)"
