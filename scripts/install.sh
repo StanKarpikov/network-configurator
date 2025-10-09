@@ -10,27 +10,27 @@ while [[ $# -gt 0 ]]; do
             SOURCE_DIR="${1#*=}"
             shift
             ;;
-        --destination-folder=*)
-            RELEASE_DIR="${1#*=}"
+        --release-folder=*)
+            RELEASE_FOLDER="${1#*=}"
             shift
             ;;
         *)
             echo "Unknown parameter: $1"
-            echo "Usage: $0 --src-python=PATH --destination-folder=PATH"
+            echo "Usage: $0 --src-python=PATH --release-folder=PATH"
             exit 1
             ;;
     esac
 done
 
-if [ -z "$SOURCE_DIR" ] || [ -z "$RELEASE_DIR" ]; then
-    echo "Usage: $0 --src-python=PATH --destination-folder=PATH"
+if [ -z "$SOURCE_DIR" ] || [ -z "$RELEASE_FOLDER" ]; then
+    echo "Usage: $0 --src-python=PATH --release-folder=PATH"
     exit 1
 fi
 
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
-RELEASE_DIR="$(cd "$RELEASE_DIR" && pwd)"
+RELEASE_FOLDER="$(cd "$RELEASE_FOLDER" && pwd)"
 
-TARGET_DIR="$RELEASE_DIR/network-configurator"
+TARGET_DIR="$RELEASE_FOLDER/network-configurator"
 
 mkdir -p "$TARGET_DIR"
 
